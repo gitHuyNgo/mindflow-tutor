@@ -101,7 +101,7 @@ nltk==3.9.3
 numpy==2.4.2
 oauthlib==3.3.1
 onnxruntime==1.24.4
-openai==1.99.9
+openai>=1.108.1
 opentelemetry-api==1.40.0
 opentelemetry-exporter-otlp-proto-common==1.40.0
 opentelemetry-exporter-otlp-proto-grpc==1.40.0
@@ -172,7 +172,6 @@ tzdata==2025.3
 uritemplate==4.2.0
 urllib3==2.6.3
 uvicorn==0.25.0
-uvloop==0.22.1
 watchfiles==1.1.1
 websocket-client==1.9.0
 websockets==16.0
