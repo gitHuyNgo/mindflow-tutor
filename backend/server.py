@@ -41,11 +41,19 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    client.close()
+
 # Create the main app
 app = FastAPI(
     title="MindFlow Tutor API",
     description="Proactive Multimodal AI Learning Assistant with Voice",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # Create a router with the /api prefix
@@ -582,6 +590,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
