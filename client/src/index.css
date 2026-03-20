@@ -1,0 +1,217 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Deep navy to light blue palette from moodboard */
+    --background: 210 40% 98%;
+    --foreground: 215 50% 10%;
+
+    --card: 210 40% 98%;
+    --card-foreground: 215 50% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 50% 10%;
+
+    --primary: 217 85% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 50% 96%;
+    --secondary-foreground: 215 50% 10%;
+
+    --muted: 210 30% 94%;
+    --muted-foreground: 215 20% 50%;
+
+    --accent: 45 100% 50%;
+    --accent-foreground: 215 50% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 210 25% 90%;
+    --input: 210 25% 90%;
+    --ring: 217 85% 53%;
+
+    --radius: 0.875rem;
+
+    /* Custom tokens */
+    --navy-deep: 218 70% 15%;
+    --navy-mid: 216 54% 35%;
+    --blue-vibrant: 217 85% 53%;
+    --blue-soft: 207 100% 94%;
+    --gold: 45 100% 50%;
+    --glass-bg: 210 40% 98% / 0.6;
+    --glass-border: 210 40% 98% / 0.3;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+    font-size: 140%;
+    background: #030D1A;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', sans-serif;
+    font-weight: 400;
+    background: #030D1A;
+  }
+  h1, h2, h3 {
+    font-family: 'Instrument Serif', serif;
+    text-wrap: balance;
+    letter-spacing: 0.04em;
+  }
+}
+
+@layer components {
+  .glass-card {
+    background: hsla(210, 40%, 98%, 0.55);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid hsla(210, 40%, 98%, 0.35);
+    box-shadow:
+      0 1px 2px hsla(215, 50%, 10%, 0.04),
+      0 4px 16px hsla(215, 50%, 10%, 0.06);
+  }
+
+  .glass-card-strong {
+    background: hsla(210, 40%, 98%, 0.75);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    border: 1px solid hsla(210, 40%, 98%, 0.5);
+    box-shadow:
+      0 1px 3px hsla(215, 50%, 10%, 0.05),
+      0 8px 32px hsla(215, 50%, 10%, 0.08);
+  }
+
+  .gradient-flow {
+    background: linear-gradient(
+      180deg,
+      #c4e2ff 0%,
+      #e0f2ff 25%,
+      #f0f8ff 50%,
+      #f8fbff 75%,
+      #ffffff 100%
+    );
+    background-attachment: fixed;
+  }
+
+  /*
+   * Section 1 — Hero arch
+   * Tighter ellipse (115% × 130%) for steeper, more visible curve bands.
+   * Center pushed below the section (50% 118%) so arches fan upward.
+   * Linear overlay fades the bottom edge to near-white for a seamless
+   * handoff into the white HowItWorks section.
+   */
+  /*
+   * Section 1 — Hero arch
+   * Bottom linear overlay fades to #eef6ff (near-white, not pure white)
+   * so the handoff colour is well-defined and Section 2 can start exactly there.
+   */
+  .hero-arch {
+    background:
+      linear-gradient(
+        180deg,
+        transparent      62%,
+        rgba(210, 235, 255, 0.55) 80%,
+        #eef6ff         100%
+      ),
+      radial-gradient(
+        ellipse 115% 130% at 50% 118%,
+        #d8eeff  0%,
+        #aad4ff  7%,
+        #76b6ff 13%,
+        #4896ff 19%,
+        #2870ec 26%,
+        #154aca 34%,
+        #0c2e9c 43%,
+        #071a6c 52%,
+        #040e42 62%,
+        #020918 72%,
+        #010512 84%
+      );
+  }
+
+  /*
+   * Section 2 — starts at #eef6ff (hero's exact bottom colour) → pure white.
+   */
+  .section-from-hero {
+    background: linear-gradient(
+      180deg,
+      #eef6ff  0%,
+      #f5faff 18%,
+      #fafcff 34%,
+      #ffffff 50%,
+      #ffffff 100%
+    );
+  }
+
+  /*
+   * Section 3 — pure white at the top → deep navy at the bottom.
+   * The opaque white stop at 0 % matches Section 2's pure-white end exactly.
+   */
+  .arch-to-dark {
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff          0%,
+        rgba(255, 255, 255, 0.60) 14%,
+        transparent      28%
+      ),
+      radial-gradient(
+        ellipse 115% 130% at 50% -18%,
+        #d8eeff  0%,
+        #aad4ff  7%,
+        #76b6ff 13%,
+        #4896ff 19%,
+        #2870ec 26%,
+        #154aca 34%,
+        #0c2e9c 43%,
+        #071a6c 52%,
+        #040e42 62%,
+        #020918 72%,
+        #010512 84%
+      );
+  }
+
+  /* Section 4 / footer: deep dark tone */
+  .deep-dark-bg {
+    background: #02080F;
+  }
+
+  .nav-glass {
+    background: hsla(218, 60%, 8%, 0.65);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border-bottom: 1px solid hsla(210, 40%, 80%, 0.1);
+    will-change: backdrop-filter;
+    transform: translateZ(0);
+  }
+
+  /* Scale nav items (links, buttons, hamburger) to 85% — logo excluded */
+  .nav-reduced {
+    zoom: 0.85;
+  }
+
+  .gold-dot {
+    @apply w-2 h-2 rounded-full;
+    background: hsl(var(--gold));
+    box-shadow: 0 0 8px hsla(45, 100%, 50%, 0.4);
+  }
+}
