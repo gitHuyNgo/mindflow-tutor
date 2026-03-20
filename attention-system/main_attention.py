@@ -1,4 +1,5 @@
 import cv2
+import time
 
 from camera.webcam import WebcamStream
 from vision.face_detector import FaceDetector
@@ -46,6 +47,20 @@ def main():
 
             if eye_dir != "center":
                 distracted = True
+            if distraction.away_start:
+                away_time = time.time() - distraction.away_start
+            else:
+                away_time = 0
+
+            cv2.putText(
+                frame,
+                f"Away: {away_time:.1f}s",
+                (20, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 255),
+                2
+            )
 
             cv2.putText(frame, f"Head: {head_dir}",
                         (20, 40),

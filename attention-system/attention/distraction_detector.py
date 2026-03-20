@@ -10,8 +10,13 @@ class DistractionDetector:
         self.episode_history = []
 
         self.away_threshold = 4
+        self.long_threshold = self.away_threshold * 4
+
         self.window_time = 60
         self.episode_trigger = 3
+
+        self.triggered = False
+        self.long_triggered = False
 
     def update(self, distracted):
 
@@ -21,24 +26,38 @@ class DistractionDetector:
 
             if self.away_start is None:
                 self.away_start = now
+                self.triggered = False
+                self.long_triggered = False
+
+            away_time = now - self.away_start
+
+            # RULE 1: nhìn đi quá lâu (4 * threshold)
+            if away_time > self.long_threshold and not self.long_triggered:
+
+                self.long_triggered = True
+
+                return True
+
+            # RULE 2: nhìn đi > threshold → count episode
+            if away_time > self.away_threshold and not self.triggered:
+
+                self.episode_history.append(now)
+
+                self.triggered = True
+
+                self.cleanup(now)
+
+                if len(self.episode_history) >= self.episode_trigger:
+
+                    self.episode_history.clear()
+
+                    return True
 
         else:
 
-            if self.away_start:
-
-                duration = now - self.away_start
-
-                if duration > self.away_threshold:
-                    self.episode_history.append(now)
-
-                self.away_start = None
-
-        self.cleanup(now)
-
-        if len(self.episode_history) >= self.episode_trigger:
-
-            self.episode_history.clear()
-            return True
+            self.away_start = None
+            self.triggered = False
+            self.long_triggered = False
 
         return False
 
