@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show:*)",
+      "Bash(python -c \":*)",
+      "Bash(conda run -n mind-tutor python -c \":*)",
+      "Bash(C:/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \":*)"
+    ]
+  }
+}

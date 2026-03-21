@@ -1,7 +1,8 @@
 import os
+import io
 import logging
 import base64
-from typing import AsyncGenerator, Optional
+from typing import Optional
 from elevenlabs import ElevenLabs, VoiceSettings
 from dotenv import load_dotenv
 
@@ -76,6 +77,21 @@ class ElevenLabsProvider:
     def set_voice(self, voice_id: str):
         """Update the voice ID"""
         self.voice_id = voice_id
+
+    def speech_to_text(self, audio_bytes: bytes, filename: str = "audio.webm") -> str:
+        """Transcribe audio bytes to text using ElevenLabs Scribe v1"""
+        try:
+            ext = filename.rsplit(".", 1)[-1].lower()
+            mime = "audio/mp4" if ext == "mp4" else "audio/webm"
+            result = self.client.speech_to_text.convert(
+                model_id="scribe_v1",
+                file=(filename, io.BytesIO(audio_bytes), mime),
+                language_code="en",
+            )
+            return result.text or ""
+        except Exception as e:
+            logger.error(f"STT error: {e}")
+            raise
 
 
 # Singleton instance
