@@ -9,6 +9,7 @@ import StartLearning from "./pages/StartLearning.tsx";
 import Login from "./pages/Login.tsx";
 import VerifyEmail from "./pages/VerifyEmail.tsx";
 import LoginSuccess from "./pages/LoginSuccess.tsx";
+import OAuthCallback from "./pages/OAuthCallback.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -26,6 +27,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/login-success" element={<LoginSuccess />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/oauth-callback" element={<OAuthCallback />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
