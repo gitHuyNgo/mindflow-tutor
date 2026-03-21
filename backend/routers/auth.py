@@ -1,6 +1,8 @@
 import os
 import re
 import uuid
+import json
+import base64
 import smtplib
 import asyncio
 import logging
@@ -8,9 +10,11 @@ import unicodedata
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -291,6 +295,174 @@ async def login(body: LoginRequest):
         },
     )
 
+
+# ── OAuth providers ───────────────────────────────────────────────────────────
+
+GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+FACEBOOK_CLIENT_ID     = os.environ.get("FACEBOOK_CLIENT_ID", "")
+FACEBOOK_CLIENT_SECRET = os.environ.get("FACEBOOK_CLIENT_SECRET", "")
+
+
+def _oauth_redirect_uri(provider: str) -> str:
+    app_url = os.environ.get("APP_URL", "http://localhost:5173")
+    return f"{app_url}/api/auth/{provider}/callback"
+
+
+def _oauth_success_redirect(app_url: str, user_id: str, email: str, full_name: str) -> str:
+    access_token = _create_jwt(
+        {"sub": user_id, "email": email},
+        expire_hours=ACCESS_TOKEN_EXPIRE_HOURS,
+    )
+    user_b64 = base64.urlsafe_b64encode(
+        json.dumps({"id": user_id, "email": email, "full_name": full_name}).encode()
+    ).decode()
+    return f"{app_url}/oauth-callback?token={access_token}&user={user_b64}"
+
+
+async def _upsert_oauth_user(email: str, full_name: str, provider: str) -> dict:
+    db = _get_db()
+    user = await db.users.find_one({"email": email})
+    if user:
+        if not user.get("is_verified"):
+            await db.users.update_one({"_id": user["_id"]}, {"$set": {"is_verified": True}})
+        return user
+    doc = {
+        "id":              str(uuid.uuid4()),
+        "email":           email,
+        "full_name":       full_name,
+        "hashed_password": None,
+        "is_verified":     True,
+        "provider":        provider,
+        "created_at":      datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    return doc
+
+
+# ── Google OAuth ──────────────────────────────────────────────────────────────
+
+@router.get("/google")
+async def google_login():
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=501, detail="Google OAuth is not configured")
+    state = _create_jwt({"purpose": "oauth_state"}, expire_hours=1)
+    params = {
+        "client_id":     GOOGLE_CLIENT_ID,
+        "redirect_uri":  _oauth_redirect_uri("google"),
+        "response_type": "code",
+        "scope":         "openid email profile",
+        "state":         state,
+        "access_type":   "online",
+    }
+    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params))
+
+
+@router.get("/google/callback")
+async def google_callback(code: str = "", state: str = "", error: str = ""):
+    app_url = os.environ.get("APP_URL", "http://localhost:5173")
+    if error or not code:
+        return RedirectResponse(f"{app_url}/login?error=google_denied")
+    try:
+        jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return RedirectResponse(f"{app_url}/login?error=invalid_state")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        token_resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code":          code,
+                "client_id":     GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri":  _oauth_redirect_uri("google"),
+                "grant_type":    "authorization_code",
+            },
+        )
+        if token_resp.status_code != 200:
+            logger.error(f"Google token exchange failed: {token_resp.text}")
+            return RedirectResponse(f"{app_url}/login?error=oauth_failed")
+
+        access_token = token_resp.json().get("access_token", "")
+        info_resp = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if info_resp.status_code != 200:
+            return RedirectResponse(f"{app_url}/login?error=oauth_failed")
+        info = info_resp.json()
+
+    email     = info.get("email", "")
+    full_name = info.get("name", "")
+    if not email:
+        return RedirectResponse(f"{app_url}/login?error=no_email")
+
+    user = await _upsert_oauth_user(email, full_name, "google")
+    return RedirectResponse(_oauth_success_redirect(app_url, user["id"], email, full_name))
+
+
+# ── Facebook OAuth ────────────────────────────────────────────────────────────
+
+@router.get("/facebook")
+async def facebook_login():
+    if not FACEBOOK_CLIENT_ID:
+        raise HTTPException(status_code=501, detail="Facebook OAuth is not configured")
+    state = _create_jwt({"purpose": "oauth_state"}, expire_hours=1)
+    params = {
+        "client_id":     FACEBOOK_CLIENT_ID,
+        "redirect_uri":  _oauth_redirect_uri("facebook"),
+        "response_type": "code",
+        "scope":         "email,public_profile",
+        "state":         state,
+    }
+    return RedirectResponse("https://www.facebook.com/v18.0/dialog/oauth?" + urlencode(params))
+
+
+@router.get("/facebook/callback")
+async def facebook_callback(code: str = "", state: str = "", error: str = ""):
+    app_url = os.environ.get("APP_URL", "http://localhost:5173")
+    if error or not code:
+        return RedirectResponse(f"{app_url}/login?error=facebook_denied")
+    try:
+        jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return RedirectResponse(f"{app_url}/login?error=invalid_state")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        token_resp = await client.get(
+            "https://graph.facebook.com/v18.0/oauth/access_token",
+            params={
+                "client_id":     FACEBOOK_CLIENT_ID,
+                "client_secret": FACEBOOK_CLIENT_SECRET,
+                "redirect_uri":  _oauth_redirect_uri("facebook"),
+                "code":          code,
+            },
+        )
+        if token_resp.status_code != 200:
+            logger.error(f"Facebook token exchange failed: {token_resp.text}")
+            return RedirectResponse(f"{app_url}/login?error=oauth_failed")
+
+        access_token = token_resp.json().get("access_token", "")
+        info_resp = await client.get(
+            "https://graph.facebook.com/me",
+            params={"fields": "id,name,email", "access_token": access_token},
+        )
+        if info_resp.status_code != 200:
+            return RedirectResponse(f"{app_url}/login?error=oauth_failed")
+        info = info_resp.json()
+
+    email     = info.get("email", "")
+    full_name = info.get("name", "")
+    if not email:
+        # Facebook may withhold email if user hasn't confirmed it
+        return RedirectResponse(f"{app_url}/login?error=no_email")
+
+    user = await _upsert_oauth_user(email, full_name, "facebook")
+    return RedirectResponse(_oauth_success_redirect(app_url, user["id"], email, full_name))
+
+
+# ── Email/password endpoints (existing) ──────────────────────────────────────
 
 class ResendRequest(BaseModel):
     email: EmailStr
