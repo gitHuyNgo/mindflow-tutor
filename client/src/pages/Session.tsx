@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Video, VideoOff, Scan, Send, LogOut, AlertTriangle } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, Scan, Send, LogOut, AlertTriangle, Volume2, VolumeX, ScreenShare, ScreenShareOff } from "lucide-react";
 import { sessionStore } from "@/lib/sessionStore";
 
 type Message = {
@@ -16,6 +16,9 @@ const supportsDocPiP = "documentPictureInPicture" in window;
 type PipBridge = {
   updateMessages: (msgs: Message[], loading: boolean) => void;
   updateControls: (mic: boolean, cam: boolean) => void;
+  updateAudio: (on: boolean) => void;
+  updateScreen: (on: boolean) => void;
+  updateRecording: (rec: boolean) => void;
 };
 
 const SessionPage = () => {
@@ -27,6 +30,9 @@ const SessionPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [micOn, setMicOn] = useState(sessionStore.micOn);
   const [camOn, setCamOn] = useState(sessionStore.camOn);
+  const [audioOn, setAudioOn] = useState(true);
+  const [screenOn, setScreenOn] = useState(!!sessionStore.screenStream);
+  const [isRecording, setIsRecording] = useState(false);
   const [timeLeft, setTimeLeft] = useState(SESSION_DURATION);
   const [isPiP, setIsPiP] = useState(false);
 
@@ -40,12 +46,92 @@ const SessionPage = () => {
   const endSessionRef = useRef<() => void>(() => {});
   const messagesRef = useRef<Message[]>([]);
   const isLoadingRef = useRef(false);
+  const audioOnRef = useRef(true);
   messagesRef.current = messages;
   isLoadingRef.current = isLoading;
+  audioOnRef.current = audioOn;
+  const screenOnRef = useRef(!!sessionStore.screenStream);
+  screenOnRef.current = screenOn;
+  const isRecordingRef = useRef(false);
+  isRecordingRef.current = isRecording;
 
   const camVideoRef = useRef<HTMLVideoElement>(null);
   const screenCaptureRef = useRef<HTMLVideoElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Play base64 audio from ElevenLabs — skipped if audio is muted
+  const playAudio = useCallback((base64: string) => {
+    if (!audioOnRef.current) return;
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+    currentAudioRef.current = audio;
+    audio.play().catch(() => {});
+    audio.onended = () => { currentAudioRef.current = null; };
+  }, []);
+
+  // Switch/start screen share via getDisplayMedia
+  const switchScreen = useCallback(async () => {
+    try {
+      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+      const newStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false });
+      screenStreamRef.current = newStream;
+      const screenVideo = screenCaptureRef.current;
+      if (screenVideo) {
+        screenVideo.srcObject = newStream;
+        screenVideo.play().catch(() => {});
+      }
+      setScreenOn(true);
+      newStream.getVideoTracks()[0].addEventListener("ended", () => {
+        screenStreamRef.current = null;
+        setScreenOn(false);
+      });
+    } catch {
+      // user cancelled or permission denied — no state change
+    }
+  }, []);
+  const switchScreenRef = useRef<() => Promise<void>>(async () => {});
+  switchScreenRef.current = switchScreen;
+
+  // Push-to-talk: record mic → STT → send as message
+  const toggleRecording = useCallback(async () => {
+    if (isRecordingRef.current) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setIsRecording(false);
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (blob.size < 500) return;
+        const fd = new FormData();
+        fd.append("audio", blob, mimeType === "audio/webm" ? "audio.webm" : "audio.mp4");
+        try {
+          const res = await fetch("/api/v1/stt", { method: "POST", body: fd });
+          const data = await res.json();
+          if (data.text?.trim()) sendMessageRef.current(data.text.trim());
+        } catch { /* silent */ }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch { /* permission denied */ }
+  }, []);
+  const toggleRecordingRef = useRef<() => void>(() => {});
+  toggleRecordingRef.current = toggleRecording;
 
   // Load DM Sans (UI font) + Material Symbols Rounded (icons, synced with float panel)
   useEffect(() => {
@@ -85,12 +171,13 @@ const SessionPage = () => {
       });
       const data = await res.json();
       addMessage("ai", data.text_response);
+      if (data.audio_base64) playAudio(data.audio_base64);
     } catch {
       addMessage("ai", "Couldn't read the screen right now. Please try again.");
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, addMessage]);
+  }, [sessionId, addMessage, playAudio]);
 
   // ── sendMessage ──
   const sendMessage = useCallback(async (text: string) => {
@@ -105,12 +192,13 @@ const SessionPage = () => {
       );
       const data = await res.json();
       addMessage("ai", data.text_response);
+      if (data.audio_base64) playAudio(data.audio_base64);
     } catch {
       addMessage("ai", "Connection error. Please try again.");
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, sessionId, addMessage]);
+  }, [isLoading, sessionId, addMessage, playAudio]);
 
   sendMessageRef.current = sendMessage;
 
@@ -125,6 +213,7 @@ const SessionPage = () => {
 
   // ── endSession ──
   const endSession = useCallback(() => {
+    currentAudioRef.current?.pause();
     closePiP();
     camStreamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -152,14 +241,14 @@ const SessionPage = () => {
     camVideo?.addEventListener("enterpictureinpicture", onEnterVideoPiP);
     camVideo?.addEventListener("leavepictureinpicture", onLeaveVideoPiP);
 
-    addMessage("ai", "Ready! Analyzing your screen now...");
-    setIsLoading(true);
-    const t = setTimeout(() => analyzeScreen(true), 800);
+    const greeting = "Hey! I'm your learning companion. Let's learn together!";
+    addMessage("ai", greeting);
+    fetch(`/api/v1/tts/generate?text=${encodeURIComponent(greeting)}`, { method: "POST" })
+      .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
     // Auto-open float panel — user activation from navigation click is still valid
     setTimeout(() => openPiPRef.current().catch(() => {}), 300);
 
     return () => {
-      clearTimeout(t);
       camVideo?.removeEventListener("enterpictureinpicture", onEnterVideoPiP);
       camVideo?.removeEventListener("leavepictureinpicture", onLeaveVideoPiP);
       camStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -189,6 +278,25 @@ const SessionPage = () => {
   useEffect(() => {
     pipBridgeRef.current?.updateControls(micOn, camOn);
   }, [micOn, camOn]);
+
+  // Sync audio state to PIP — stop current audio immediately when muted
+  useEffect(() => {
+    if (!audioOn) {
+      currentAudioRef.current?.pause();
+      currentAudioRef.current = null;
+    }
+    pipBridgeRef.current?.updateAudio(audioOn);
+  }, [audioOn]);
+
+  // Sync screen share state to PIP
+  useEffect(() => {
+    pipBridgeRef.current?.updateScreen(screenOn);
+  }, [screenOn]);
+
+  // Sync recording state to PIP
+  useEffect(() => {
+    pipBridgeRef.current?.updateRecording(isRecording);
+  }, [isRecording]);
 
   // Countdown
   useEffect(() => {
@@ -241,6 +349,11 @@ const SessionPage = () => {
 
         const style = pipWin.document.createElement("style");
         style.textContent = `
+          @keyframes pip-recording {
+            0% { box-shadow:0 0 0 0 rgba(239,68,68,.6) }
+            70% { box-shadow:0 0 0 7px rgba(239,68,68,0) }
+            100% { box-shadow:0 0 0 0 rgba(239,68,68,0) }
+          }
           @keyframes pip-bounce {
             0%,80%,100% { transform:translateY(0);opacity:.4 }
             40%          { transform:translateY(-5px);opacity:1 }
@@ -302,6 +415,11 @@ const SessionPage = () => {
               <input id="pip-input" type="text" placeholder="Ask anything..."
                 style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);transition:border-color .15s,background .15s;
                        border-radius:24px;padding:7px 14px;color:white;font-size:12px;font-family:'DM Sans',sans-serif">
+              <button id="pip-stt" class="pip-btn"
+                style="width:32px;height:32px;border-radius:50%;border:none;
+                       background:rgba(255,255,255,.07);color:rgba(255,255,255,.5)">
+                <span class="ms" style="font-size:17px">mic</span>
+              </button>
               <button id="pip-send" class="pip-btn"
                 style="width:32px;height:32px;border-radius:50%;border:none;
                        background:rgba(138,180,248,.85);color:#030D1A;
@@ -316,6 +434,12 @@ const SessionPage = () => {
                 style="width:38px;height:38px;border-radius:50%;border:none">
               </button>
               <button id="pip-cam-btn" class="pip-btn"
+                style="width:38px;height:38px;border-radius:50%;border:none">
+              </button>
+              <button id="pip-audio" class="pip-btn"
+                style="width:38px;height:38px;border-radius:50%;border:none">
+              </button>
+              <button id="pip-screen" class="pip-btn"
                 style="width:38px;height:38px;border-radius:50%;border:none">
               </button>
               <div style="flex:1"></div>
@@ -345,7 +469,7 @@ const SessionPage = () => {
               background:${isUser ? "rgba(138,180,248,.2)" : "rgba(255,255,255,.07)"};
               border:1px solid ${isUser ? "rgba(138,180,248,.32)" : "rgba(255,255,255,.1)"};
               color:rgba(255,255,255,${isUser ? ".95" : ".85"});
-              border-radius:18px;padding:6px 11px;font-size:11.5px;line-height:1.55;
+              border-radius:18px;padding:6px 11px;font-size:13.5px;line-height:1.55;
               font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;letter-spacing:0.01em;
               border-bottom-${isUser ? "right" : "left"}-radius:4px${isUser ? ";box-shadow:0 2px 10px rgba(138,180,248,.1)" : ""}">
               ${m.content}
@@ -368,6 +492,10 @@ const SessionPage = () => {
         // ── Bridge: mic/cam controls ──
         const micBtn = pipWin.document.getElementById("pip-mic")!;
         const camBtn = pipWin.document.getElementById("pip-cam-btn")!;
+        const audioBtn = pipWin.document.getElementById("pip-audio")!;
+        const screenBtn = pipWin.document.getElementById("pip-screen")!;
+        const sttBtn = pipWin.document.getElementById("pip-stt")!;
+        const pipInput = pipWin.document.getElementById("pip-input") as HTMLInputElement;
 
         const updateControls = (mic: boolean, cam: boolean) => {
           micBtn.style.background = mic ? "rgba(138,180,248,.85)" : "rgba(239,68,68,.75)";
@@ -378,17 +506,42 @@ const SessionPage = () => {
           camBtn.innerHTML = `<span class="ms">${cam ? "videocam" : "videocam_off"}</span>`;
         };
 
-        pipBridgeRef.current = { updateMessages, updateControls };
+        const updateAudio = (on: boolean) => {
+          audioBtn.style.background = on ? "rgba(138,180,248,.85)" : "rgba(239,68,68,.75)";
+          audioBtn.style.color = on ? "#030D1A" : "white";
+          audioBtn.innerHTML = `<span class="ms">${on ? "volume_up" : "volume_off"}</span>`;
+        };
+
+        const updateScreen = (on: boolean) => {
+          screenBtn.style.background = on ? "rgba(138,180,248,.85)" : "rgba(255,255,255,.07)";
+          screenBtn.style.color = on ? "#030D1A" : "rgba(255,255,255,.5)";
+          screenBtn.innerHTML = `<span class="ms">${on ? "screen_share" : "stop_screen_share"}</span>`;
+        };
+
+        const updateRecording = (rec: boolean) => {
+          sttBtn.style.background = rec ? "rgba(239,68,68,.85)" : "rgba(255,255,255,.07)";
+          sttBtn.style.color = rec ? "white" : "rgba(255,255,255,.5)";
+          sttBtn.style.animation = rec ? "pip-recording 1s ease infinite" : "none";
+          pipInput.placeholder = rec ? "Listening..." : "Ask anything...";
+          pipInput.disabled = rec;
+        };
+
+        pipBridgeRef.current = { updateMessages, updateControls, updateAudio, updateScreen, updateRecording };
 
         // Seed with current state immediately
         updateMessages(messagesRef.current, isLoadingRef.current);
         updateControls(micOn, camOn);
+        updateAudio(audioOnRef.current);
+        updateScreen(screenOnRef.current);
+        updateRecording(isRecordingRef.current);
 
         // ── Wire buttons ──
         micBtn.addEventListener("click", () => setMicOn(p => !p));
         camBtn.addEventListener("click", () => setCamOn(p => !p));
+        audioBtn.addEventListener("click", () => setAudioOn(p => !p));
+        screenBtn.addEventListener("click", () => switchScreenRef.current());
+        sttBtn.addEventListener("click", () => toggleRecordingRef.current());
 
-        const pipInput = pipWin.document.getElementById("pip-input") as HTMLInputElement;
         const doSend = () => {
           const text = pipInput.value.trim();
           if (!text) return;
@@ -449,9 +602,9 @@ const SessionPage = () => {
       />
 
       {/* ── Top bar ── */}
-      <header className="nav-glass shrink-0 flex items-center gap-3 px-5 h-[3.4rem] z-10 border-b border-white/[0.06]">
+      <header className="nav-glass shrink-0 flex items-center gap-3 px-4 md:px-6 h-[3.4rem] z-10 border-b border-white/[0.06]">
         <div className="gold-dot" />
-        <span className="font-semibold text-white text-[15px]" style={{ fontFamily: "'DM Sans', sans-serif" }}>Mind Tutor</span>
+        <span className="font-semibold text-lg tracking-tight text-white" style={{ fontFamily: "'DM Sans', sans-serif" }}>Mind Tutor</span>
         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-400/10 border border-emerald-400/20">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />
           <span className="text-[10px] text-emerald-400/90 font-medium tracking-wide" style={{ fontFamily: "'DM Sans', sans-serif" }}>LIVE</span>
@@ -505,7 +658,7 @@ const SessionPage = () => {
                     </div>
                   )}
                   <div
-                    className={`max-w-[72%] rounded-[18px] px-4 py-2.5 text-[13px] leading-relaxed shadow-sm ${
+                    className={`max-w-[72%] rounded-[18px] px-4 py-2.5 text-[15px] leading-relaxed shadow-sm ${
                       msg.role === "user"
                         ? "bg-[rgba(138,180,248,0.16)] border border-[rgba(138,180,248,0.28)] text-white/95 rounded-br-[4px] shadow-[0_2px_12px_rgba(138,180,248,0.1)]"
                         : "bg-white/[0.07] border border-white/[0.1] text-white/85 rounded-bl-[4px]"
@@ -560,6 +713,24 @@ const SessionPage = () => {
               {camOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
             </button>
 
+            <button onClick={() => setAudioOn(p => !p)} title={audioOn ? "Mute AI voice" : "Unmute AI voice"}
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-90 cursor-pointer ${
+                audioOn
+                  ? "bg-[rgba(138,180,248,0.85)] text-[#030D1A] shadow-[0_0_12px_rgba(138,180,248,0.25)]"
+                  : "bg-red-500/12 text-red-400 hover:bg-red-500/22 border border-red-500/20"
+              }`}>
+              {audioOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
+            <button onClick={switchScreen} title={screenOn ? "Switch screen" : "Share screen"}
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-90 cursor-pointer ${
+                screenOn
+                  ? "bg-[rgba(138,180,248,0.85)] text-[#030D1A] shadow-[0_0_12px_rgba(138,180,248,0.25)]"
+                  : "bg-white/[0.06] text-white/50 hover:text-white/80 hover:bg-white/[0.09] border border-white/[0.09]"
+              }`}>
+              {screenOn ? <ScreenShare className="w-4 h-4" /> : <ScreenShareOff className="w-4 h-4" />}
+            </button>
+
             <div className="w-px h-4 bg-white/10 mx-1" />
 
             <button onClick={() => analyzeScreen()} disabled={isLoading || !screenStreamRef.current}
@@ -584,14 +755,23 @@ const SessionPage = () => {
           {/* Input row */}
           <div className="flex gap-2 items-center">
             <input
-              value={inputText}
+              value={isRecording ? "" : inputText}
               onChange={e => setInputText(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sendMessage(inputText); } }}
-              placeholder="Type your question..."
-              className="flex-1 h-11 rounded-3xl bg-white/[0.05] border border-white/[0.1] px-5 text-[13px] text-white/90 placeholder:text-white/22 focus:outline-none focus:border-[rgba(138,180,248,0.4)] focus:bg-white/[0.07] transition-all"
+              placeholder={isRecording ? "Listening..." : "Type your question..."}
+              disabled={isRecording}
+              className="flex-1 h-11 rounded-3xl bg-white/[0.05] border border-white/[0.1] px-5 text-[13px] text-white/90 placeholder:text-white/22 focus:outline-none focus:border-[rgba(138,180,248,0.4)] focus:bg-white/[0.07] transition-all disabled:cursor-not-allowed"
               style={{ fontFamily: "'DM Sans', sans-serif" }}
             />
-            <button onClick={() => sendMessage(inputText)} disabled={!inputText.trim() || isLoading}
+            <button onClick={toggleRecording} title={isRecording ? "Stop recording" : "Speak to AI"}
+              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
+                isRecording
+                  ? "bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.25)] animate-pulse"
+                  : "bg-white/[0.07] border border-white/[0.1] text-white/55 hover:text-white/85 hover:bg-white/[0.12]"
+              }`}>
+              <Mic className="w-4 h-4" />
+            </button>
+            <button onClick={() => sendMessage(inputText)} disabled={!inputText.trim() || isLoading || isRecording}
               className="w-11 h-11 rounded-full bg-[rgba(138,180,248,0.85)] flex items-center justify-center text-[#030D1A] disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95 hover:bg-[rgba(138,180,248,0.95)] shadow-[0_0_16px_rgba(138,180,248,0.2)] cursor-pointer">
               <Send className="w-4 h-4" />
             </button>

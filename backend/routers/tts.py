@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from providers.elevenlabs_provider import get_elevenlabs_provider
@@ -42,4 +42,17 @@ async def generate_tts(text: str):
         }
     except Exception as e:
         logger.error(f"TTS generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/v1/stt", response_model=dict)
+async def speech_to_text(audio: UploadFile = File(...)):
+    """Transcribe audio to text using ElevenLabs Scribe"""
+    try:
+        tts = get_elevenlabs_provider()
+        audio_bytes = await audio.read()
+        text = tts.speech_to_text(audio_bytes, audio.filename or "audio.webm")
+        return {"text": text, "success": True}
+    except Exception as e:
+        logger.error(f"STT error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
