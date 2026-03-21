@@ -29,6 +29,11 @@ class ProcessTriggerResponse(BaseModel):
     sources_used: List[str] = Field(default_factory=list)
 
 
+class DetectorFrameRequest(BaseModel):
+    """Request model for webcam frame analysis"""
+    image_base64: str = Field(..., description="Base64 encoded camera frame")
+
+
 class DocumentUploadResponse(BaseModel):
     """Response for document upload"""
     document_id: str

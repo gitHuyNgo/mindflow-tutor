@@ -1,0 +1,16 @@
+services:
+  mindflow-tutor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mindflow-tutor
+    working_dir: /app
+    command: python Combined_detector.py
+    volumes:
+      - ./:/app
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+    devices:
+      - /dev/video0:/dev/video0

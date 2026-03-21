@@ -1,0 +1,9 @@
+opencv-python
+mediapipe==0.10.9
+torch>=2.0.0
+facenet-pytorch>=2.5.3
+timm==0.9.12
+opencv-python>=4.8.0
+Pillow>=9.0.0
+hsemotion
+numpy<2

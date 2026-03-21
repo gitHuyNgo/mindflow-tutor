@@ -4,8 +4,9 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from schemas.models import ProcessTriggerRequest
+from schemas.models import ProcessTriggerRequest, DetectorFrameRequest
 from engines.orchestrator import get_orchestrator
+from engines.combined_detector_engine import get_combined_detector_engine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ai"])
@@ -56,4 +57,16 @@ async def ask_question(question: str, session_id: Optional[str] = None):
         }
     except Exception as e:
         logger.error(f"Error in ask: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/v1/detector/frame", response_model=dict)
+async def detect_frame(request: DetectorFrameRequest):
+    """Analyze one camera frame and return distraction/confusion states"""
+    try:
+        detector = get_combined_detector_engine()
+        result = detector.detect_from_base64(request.image_base64)
+        return result
+    except Exception as e:
+        logger.error(f"Error in detector/frame: {e}")
         raise HTTPException(status_code=500, detail=str(e))
