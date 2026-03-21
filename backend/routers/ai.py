@@ -4,9 +4,10 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from schemas.models import ProcessTriggerRequest, DetectorFrameRequest
+from schemas.models import ProcessTriggerRequest, DetectorFrameRequest, ClassifyIntentRequest
 from engines.orchestrator import get_orchestrator
 from engines.combined_detector_engine import get_combined_detector_engine
+from providers.openai_provider import get_openai_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ai"])
@@ -65,8 +66,20 @@ async def detect_frame(request: DetectorFrameRequest):
     """Analyze one camera frame and return distraction/confusion states"""
     try:
         detector = get_combined_detector_engine()
-        result = detector.detect_from_base64(request.image_base64)
+        result = await detector.detect_from_base64_async(request.image_base64)
         return result
     except Exception as e:
         logger.error(f"Error in detector/frame: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/v1/utils/classify-intent", response_model=dict)
+async def classify_intent(request: ClassifyIntentRequest):
+    """Semantic yes/no classification: does `text` match `intent`?"""
+    try:
+        provider = get_openai_provider()
+        match = await provider.classify_intent(request.text, request.intent)
+        return {"match": match}
+    except Exception as e:
+        logger.error(f"Error in classify-intent: {e}")
+        return {"match": False}

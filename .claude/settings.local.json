@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \"import numpy; import cv2; import mediapipe; print\\(''numpy'', numpy.__version__\\); print\\(''cv2'', cv2.__version__\\); print\\(''mediapipe'', mediapipe.__version__\\)\")",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \"import mediapipe.python.solutions.face_mesh as fm; print\\(fm.FaceMesh\\)\")",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \"import mediapipe; print\\(dir\\(mediapipe\\)\\)\")",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip index versions mediapipe)",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip install mediapipe==0.10.14 --quiet)",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \"import mediapipe as mp; print\\(hasattr\\(mp, ''''solutions''''\\)\\)\")",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip install mediapipe==0.10.33 --quiet)"
     ]
   }
 }

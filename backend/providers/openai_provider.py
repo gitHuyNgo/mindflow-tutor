@@ -81,6 +81,24 @@ class OpenAIProvider:
             raise
 
 
+    async def classify_intent(self, text: str, intent: str) -> bool:
+        """Semantically classify whether `text` matches `intent`. Returns True/False."""
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a binary intent classifier. Reply only with 'yes' or 'no'."},
+                    {"role": "user", "content": f'Does this message convey the intent: "{intent}"?\n\nMessage: "{text}"'},
+                ],
+                max_tokens=3,
+                temperature=0,
+            )
+            return response.choices[0].message.content.strip().lower().startswith("yes")
+        except Exception as e:
+            logger.error(f"classify_intent error: {e}")
+            return False
+
+
 # Singleton instance
 _openai_provider: Optional[OpenAIProvider] = None
 

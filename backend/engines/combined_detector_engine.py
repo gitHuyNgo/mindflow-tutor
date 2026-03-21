@@ -1,5 +1,8 @@
+import asyncio
 import base64
+import json
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 import cv2
@@ -40,18 +43,39 @@ class CombinedDetectorEngine:
     def detect_from_base64(self, image_base64: str) -> dict:
         frame_bgr = self._decode_frame(image_base64)
 
-        distracted, is_centered = self.distract_detector.detect_distraction(frame_bgr)
+        distracted, face_is_centered, eye_is_centered = (
+            self.distract_detector.detect_distraction(frame_bgr)
+        )
 
         confused = False
-        if is_centered:
-            confused = self.confuse_detector.detect_confusion(frame_bgr)
+        emotion = None
+        if face_is_centered and eye_is_centered:
+            confused, emotion = self.confuse_detector.detect_confusion(
+                frame_bgr, draw=False
+            )
 
-        return {
+        result = {
             "success": True,
             "confused": bool(confused),
-            "distracted": bool(distracted),
-            "is_centered": bool(is_centered),
+            "distracted": bool(distracted)
         }
+
+        logger.info(
+            json.dumps(
+                {
+                    "event": "frame_detection",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    **result,
+                }
+            )
+        )
+
+        return result
+
+    async def detect_from_base64_async(self, image_base64: str) -> dict:
+        """Non-blocking version — runs heavy CV work in a thread pool."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.detect_from_base64, image_base64)
 
 
 _combined_detector_engine: Optional[CombinedDetectorEngine] = None

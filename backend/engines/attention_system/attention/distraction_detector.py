@@ -10,9 +10,9 @@ class DistractionDetector:
         self.episode_history = []
 
         self.away_threshold = away_threshold
-        self.long_threshold = self.away_threshold * 4
+        self.long_threshold = self.away_threshold * 2
 
-        self.window_time = 60
+        self.window_time = 30
         self.episode_trigger = 3
 
         self.triggered = False
@@ -64,6 +64,5 @@ class DistractionDetector:
     def cleanup(self, now):
 
         self.episode_history = [
-            t for t in self.episode_history
-            if now - t < self.window_time
+            t for t in self.episode_history if now - t < self.window_time
         ]
