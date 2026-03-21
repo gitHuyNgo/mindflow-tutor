@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException
 
 from schemas.models import ProcessTriggerRequest, DetectorFrameRequest, ClassifyIntentRequest
 from engines.orchestrator import get_orchestrator
-from engines.combined_detector_engine import get_combined_detector_engine
 from providers.openai_provider import get_openai_provider
 
 logger = logging.getLogger(__name__)
@@ -65,6 +64,7 @@ async def ask_question(question: str, session_id: Optional[str] = None):
 async def detect_frame(request: DetectorFrameRequest):
     """Analyze one camera frame and return distraction/confusion states"""
     try:
+        from engines.combined_detector_engine import get_combined_detector_engine
         detector = get_combined_detector_engine()
         result = await detector.detect_from_base64_async(request.image_base64)
         return result

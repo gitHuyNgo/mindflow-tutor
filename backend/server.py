@@ -11,7 +11,7 @@ import uuid
 import logging
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / '.env', override=True)
 
 from routers.auth import router as auth_router
 from routers.voice import router as voice_router

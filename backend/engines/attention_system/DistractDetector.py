@@ -26,6 +26,7 @@ class DistractionDetector():
         distracted = False
 
         head_dir = True
+        eye_dir = "center"
         if landmarks:
 
             head_dir = head_pose.estimate(frame, landmarks)
