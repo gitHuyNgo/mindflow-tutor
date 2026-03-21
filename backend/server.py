@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from contextlib import asynccontextmanager
+from passlib.context import CryptContext
 import os
 import logging
 from pathlib import Path
@@ -35,16 +37,52 @@ from providers.tavily_provider import get_tavily_provider
 from providers.voice_ai_provider import get_voice_ai_provider
 from persistence.session_memory import get_session_memory
 from core.prompts import TUTOR_SYSTEM_PROMPT
+from routers.auth import router as auth_router
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-from contextlib import asynccontextmanager
+_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+_ADMIN_SEED = {
+    "full_name": "admin",
+    "email":     "admin1234.test@gmail.com",
+    "password":  "admin1234",
+    "role":      "admin",
+}
+
+
+async def _seed_admin():
+    existing = await db.users.find_one({"email": _ADMIN_SEED["email"]})
+    if existing:
+        return
+    doc = {
+        "id":                     str(uuid.uuid4()),
+        "email":                  _ADMIN_SEED["email"],
+        "full_name":              _ADMIN_SEED["full_name"],
+        "hashed_password":        _pwd_ctx.hash(_ADMIN_SEED["password"]),
+        "role":                   _ADMIN_SEED["role"],
+        "is_verified":            True,
+        "verification_token":     None,
+        "verification_token_exp": None,
+        "created_at":             datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    logger.info(f"[seed] Admin account created: {_ADMIN_SEED['email']}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await _seed_admin()
     yield
     client.close()
 
@@ -62,13 +100,6 @@ api_router = APIRouter(prefix="/api")
 # Uploads directory
 UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", "/app/data/uploads"))
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # Store active WebSocket sessions
 active_voice_sessions: Dict[str, dict] = {}
@@ -580,6 +611,7 @@ async def web_search(request: SearchRequest):
 
 
 # Include the router in the main app
+api_router.include_router(auth_router)
 app.include_router(api_router)
 
 app.add_middleware(
