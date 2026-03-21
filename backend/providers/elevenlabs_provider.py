@@ -6,7 +6,7 @@ from typing import Optional
 from elevenlabs import ElevenLabs, VoiceSettings
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 

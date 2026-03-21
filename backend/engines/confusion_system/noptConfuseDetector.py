@@ -1,7 +1,11 @@
 import time
+import threading
 import cv2
 import numpy as np
 import torch
+from timm.models.efficientnet import EfficientNet as _EfficientNet
+if hasattr(torch.serialization, "add_safe_globals"):
+    torch.serialization.add_safe_globals([_EfficientNet])
 from hsemotion.facial_emotions import HSEmotionRecognizer
 
 try:
@@ -29,6 +33,7 @@ class ConfuseDetector:
         # Lightweight OpenCV DNN face detector
         download_dnn_model()
         self.face_net = cv2.dnn.readNetFromCaffe(str(PROTOTXT_PATH), str(WEIGHTS_PATH))
+        self._dnn_lock = threading.Lock()
         self.model = HSEmotionRecognizer(model_name=model_name, device=DEVICE)
 
         self.confused_elapsed = 0.0
@@ -45,8 +50,9 @@ class ConfuseDetector:
         blob = cv2.dnn.blobFromImage(
             cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0)
         )
-        self.face_net.setInput(blob)
-        detections = self.face_net.forward()
+        with self._dnn_lock:
+            self.face_net.setInput(blob)
+            detections = self.face_net.forward()
 
         best_box = None
         best_conf = 0.5  # confidence threshold
@@ -178,10 +184,6 @@ class ConfuseDetector:
         cap.set(cv2.CAP_PROP_FPS, 15)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        face = None
-        frame_count = 0
-        DETECT_EVERY_N = 3  # run face detection every 3 frames
 
         print(f"Running on: {DEVICE}")
         print("Press Q to quit")

@@ -57,7 +57,7 @@ class CombinedDetectorEngine:
         result = {
             "success": True,
             "confused": bool(confused),
-            "distracted": bool(distracted)
+            "distracted": bool(distracted),
         }
 
         logger.info(

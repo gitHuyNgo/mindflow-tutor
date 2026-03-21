@@ -184,112 +184,57 @@ const SessionPage = () => {
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
 
-    const normalized = text.trim().toLowerCase();
     setInputText("");
     addMessage("user", text);
 
-    // ── Acknowledgement for distraction reminder ──
-    if (awaitingDistractionReplyRef.current) {
-      awaitingDistractionReplyRef.current = false;
+    // ── While in detection-paused state ──
+    if (detectionAckTypeRef.current) {
+      const ackType = detectionAckTypeRef.current;
+      detectionAckTypeRef.current = null;
+
+      // Classify intent in parallel with potential AI query
+      const intent = ackType === 'distraction'
+        ? "the user is acknowledging they were distracted and will refocus on studying"
+        : "the user understands the topic and has no more questions about it";
+
       let isAck = false;
       try {
         const r = await fetch("/api/v1/utils/classify-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, intent: "the user is acknowledging they were distracted and will refocus on studying" }),
+          body: JSON.stringify({ text, intent }),
         });
         isAck = (await r.json()).match === true;
-      } catch { /* fallback: treat as normal question */ }
+      } catch { }
+
+      // Always start 4s resume timer after first user message
+      if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
+      detectorResumeTimerRef.current = setTimeout(() => {
+        detectorPausedRef.current = false;
+        setDetectorState(null);
+        detectorResumeTimerRef.current = null;
+      }, 4000);
 
       if (isAck) {
-        if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
-        detectorResumeTimerRef.current = setTimeout(() => {
-          detectorPausedRef.current = false;
-          setDetectorState(null);
-          detectorResumeTimerRef.current = null;
-        }, 5000);
-        const encourage = "That's the spirit! Let's keep going 💪";
-        addMessage("ai", encourage);
-        fetch(`/api/v1/tts/generate?text=${encodeURIComponent(encourage)}`, { method: "POST" })
+        // Confirmed: send short ack message, no AI query
+        const ackMsg = ackType === 'distraction'
+          ? "That's the spirit! Let's keep going 💪"
+          : "Nice, we figured it out together 🙌";
+        addMessage("ai", ackMsg);
+        fetch(`/api/v1/tts/generate?text=${encodeURIComponent(ackMsg)}`, { method: "POST" })
           .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
         return;
       }
-      // Not an ack → resume detector, process as normal question
-      detectorPausedRef.current = false;
-      setDetectorState(null);
-    }
 
-    // ── Yes/No response to confusion check-in ──
-    if (awaitingConfusionReplyRef.current) {
-      awaitingConfusionReplyRef.current = false;
-
-      if (normalized.startsWith("yes")) {
-        const ack = "I captured this moment for us 👇\nWhat part feels unclear? Let's figure it out together.";
-        addMessage("ai", ack, pendingConfusionFrameRef.current ?? undefined);
-        fetch(`/api/v1/tts/generate?text=${encodeURIComponent(ack)}`, { method: "POST" })
-          .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
-        confusionFrameReadyRef.current = true;
-        return;
-      }
-
-      // "no" or anything else → discard frame, resume detector
-      detectorPausedRef.current = false;
-      setDetectorState(null);
+      // Not ack → do nothing, 4s timer already set
       pendingConfusionFrameRef.current = null;
-      if (normalized.startsWith("no")) return;
-      // Other message: fall through to normal flow
-    }
-
-    // ── Understanding confirmation during interaction phase ──
-    if (inConfusionInteractionRef.current) {
-      let isUnderstanding = false;
-      try {
-        const r = await fetch("/api/v1/utils/classify-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, intent: "the user understands the topic and has no more questions about it" }),
-        });
-        isUnderstanding = (await r.json()).match === true;
-      } catch { /* fallback: treat as follow-up question */ }
-
-      if (isUnderstanding) {
-        inConfusionInteractionRef.current = false;
-        pendingConfusionFrameRef.current = null;
-        if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
-        detectorResumeTimerRef.current = setTimeout(() => {
-          detectorPausedRef.current = false;
-          setDetectorState(null);
-          detectorResumeTimerRef.current = null;
-        }, 5000);
-        const wrap = "Nice, we figured it out together 🙌";
-        addMessage("ai", wrap);
-        fetch(`/api/v1/tts/generate?text=${encodeURIComponent(wrap)}`, { method: "POST" })
-          .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
-        return;
-      }
+      return;
     }
 
     // ── Send to AI ──
     setIsLoading(true);
     try {
-      let res: Response;
-      if (confusionFrameReadyRef.current) {
-        // First question after "yes" — send frame as context
-        confusionFrameReadyRef.current = false;
-        inConfusionInteractionRef.current = true;
-        const frame = pendingConfusionFrameRef.current;
-        if (frame) {
-          res = await fetch("/api/v1/process-trigger", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ screen_capture: frame, session_id: sessionId, user_query: text }),
-          });
-        } else {
-          res = await fetch(`/api/v1/ask?question=${encodeURIComponent(text)}&session_id=${sessionId}`, { method: "POST" });
-        }
-      } else {
-        res = await fetch(`/api/v1/ask?question=${encodeURIComponent(text)}&session_id=${sessionId}`, { method: "POST" });
-      }
+      const res = await fetch(`/api/v1/ask?question=${encodeURIComponent(text)}&session_id=${sessionId}`, { method: "POST" });
       const data = await res.json();
       addMessage("ai", data.text_response);
       if (data.audio_base64) playAudio(data.audio_base64);
@@ -297,10 +242,6 @@ const SessionPage = () => {
       addMessage("ai", "Connection error. Please try again.");
     } finally {
       setIsLoading(false);
-      if (!inConfusionInteractionRef.current && detectorPausedRef.current) {
-        detectorPausedRef.current = false;
-        setDetectorState(null);
-      }
     }
   }, [isLoading, sessionId, addMessage, playAudio]);
 
@@ -407,10 +348,7 @@ const SessionPage = () => {
   const detectorPausedRef = useRef(false);
   const detectorResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingConfusionFrameRef = useRef<string | null>(null);
-  const awaitingConfusionReplyRef = useRef(false);
-  const awaitingDistractionReplyRef = useRef(false);
-  const confusionFrameReadyRef = useRef(false);
-  const inConfusionInteractionRef = useRef(false);
+  const detectionAckTypeRef = useRef<'confusion' | 'distraction' | null>(null);
 
   useEffect(() => {
     if (!camOn) { setDetectorState(null); return; }
@@ -435,9 +373,8 @@ const SessionPage = () => {
 
         if (data.confused) {
           setDetectorState("confused");
-          // Pause detector immediately so it doesn't fire again
           detectorPausedRef.current = true;
-          awaitingConfusionReplyRef.current = true;
+          detectionAckTypeRef.current = 'confusion';
 
           // Capture current screen frame (what the user is studying)
           const sv = screenCaptureRef.current;
@@ -451,7 +388,7 @@ const SessionPage = () => {
             pendingConfusionFrameRef.current = null;
           }
 
-          const checkIn = "Hey, it looks like something might be confusing here 👀\nAm I right? (yes/no)";
+          const checkIn = "Hey, it looks like something might be confusing here 👀 Feel free to ask me anything!";
           addMessage("ai", checkIn);
           fetch(`/api/v1/tts/generate?text=${encodeURIComponent(checkIn)}`, { method: "POST" })
             .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
@@ -459,7 +396,7 @@ const SessionPage = () => {
         } else if (data.distracted) {
           setDetectorState("distracted");
           detectorPausedRef.current = true;
-          awaitingDistractionReplyRef.current = true;
+          detectionAckTypeRef.current = 'distraction';
           const msg = "Hey my friend, let's focus again, we can do this together 💪";
           addMessage("ai", msg);
           fetch(`/api/v1/tts/generate?text=${encodeURIComponent(msg)}`, { method: "POST" })
