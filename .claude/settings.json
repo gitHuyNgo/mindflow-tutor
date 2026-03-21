@@ -4,7 +4,21 @@
       "Bash(pip show:*)",
       "Bash(python -c \":*)",
       "Bash(conda run -n mind-tutor python -c \":*)",
-      "Bash(C:/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \":*)"
+      "Bash(C:/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \":*)",
+      "Bash(ls c:/GIAHUY/github/mindflow-tutor/backend/*.py)",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"push-to-talk voice recording button interaction\" --domain ux -n 3)",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"push-to-talk voice button interaction touch\" --domain ux -n 3)",
+      "Bash(pip check:*)",
+      "Bash(python -c \"import hsemotion; import os; print\\(os.path.dirname\\(hsemotion.__file__\\)\\)\")",
+      "Bash(conda run:*)",
+      "Read(//c/Users/LEGION/**)",
+      "Read(//c/Users/**)",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip install \"numpy>=2.0\" \"mediapipe>=0.10.14\" --quiet)",
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip check)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\LEGION\\.conda\\envs\\mind-tutor\\Lib\\site-packages\\hsemotion"
     ]
   }
 }

@@ -42,29 +42,6 @@ class DistractionDetector():
             else:
                 away_time = 0
 
-            # cv2.putText(
-            #     frame,
-            #     f"Away: {away_time:.1f}s",
-            #     (20, 120),
-            #     cv2.FONT_HERSHEY_SIMPLEX,
-            #     0.8,
-            #     (0, 255, 255),
-            #     2
-            # )
-
-            # cv2.putText(frame, f"Head: {head_dir}",
-            #             (20, 40),
-            #             cv2.FONT_HERSHEY_SIMPLEX,
-            #             0.8,
-            #             (0, 255, 0), 2)
-
-            # cv2.putText(frame, f"Eye: {eye_dir}",
-            #             (20, 80),
-            #             cv2.FONT_HERSHEY_SIMPLEX,
-            #             0.8,
-            #             (0, 255, 0), 2)
-
         notify = distraction.update(distracted)
 
-        return notify, head_dir == "center"
-
+        return notify, head_dir == "center", eye_dir == "center"

@@ -2,23 +2,26 @@ import time
 import cv2
 import numpy as np
 import torch
-from pathlib import Path
 from hsemotion.facial_emotions import HSEmotionRecognizer
+
 try:
-    from .download import download_dnn_model
+    from .download import download_dnn_model, PROTOTXT_PATH, WEIGHTS_PATH
 except ImportError:
-    from download import download_dnn_model
+    from download import download_dnn_model, PROTOTXT_PATH, WEIGHTS_PATH
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-NORMAL_EMOTIONS = {'neutral', 'happiness', 'surprise'}
-CONFUSED_EMOTIONS = {'sadness', 'anger', 'disgust', 'fear', 'contempt'}
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+NORMAL_EMOTIONS = {"neutral", "happiness", "surprise"}
+CONFUSED_EMOTIONS = {"sadness", "anger", "disgust", "fear", "contempt"}
 
-# DNN model files — downloaded once on first run
-PROTOTXT_PATH = Path(".\model\deploy.prototxt")
-WEIGHTS_PATH = Path(".\model\\res10_300x300_ssd.caffemodel")
 
 class ConfuseDetector:
-    def __init__(self, model_name="enet_b0_8_best_afew", confuse_threshold=5, recover_threshold=3, clear_threshold=1):
+    def __init__(
+        self,
+        model_name="enet_b0_8_best_afew",
+        confuse_threshold=5,
+        recover_threshold=3,
+        clear_threshold=1,
+    ):
         self.CONFUSED_THRESHOLD_SECONDS = confuse_threshold
         self.RECOVER_GRACE_SECONDS = recover_threshold
         self.CLEAR_THRESHOLD_SECONDS = clear_threshold
@@ -27,20 +30,21 @@ class ConfuseDetector:
         download_dnn_model()
         self.face_net = cv2.dnn.readNetFromCaffe(str(PROTOTXT_PATH), str(WEIGHTS_PATH))
         self.model = HSEmotionRecognizer(model_name=model_name, device=DEVICE)
-        
+
         self.confused_elapsed = 0.0
         self.confused_since = None
         self.recover_start_time = None
 
         self._face_cache = None
-        self._frame_count = 0        
+        self._frame_count = 0
         self.DETECT_EVERY_N = 3
         self.is_confused = False
 
     def detect_face(self, frame):
         h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0,
-                                     (300, 300), (104.0, 177.0, 123.0))
+        blob = cv2.dnn.blobFromImage(
+            cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0)
+        )
         self.face_net.setInput(blob)
         detections = self.face_net.forward()
 
@@ -119,19 +123,19 @@ class ConfuseDetector:
             total += now - self.confused_since
 
         if emotion is None:
-            return 'No face detected', (180, 180, 180)
+            return "No face detected", (180, 180, 180)
         elif confused:
             if self.clear_start_time is not None:
                 remaining = self.CLEAR_THRESHOLD_SECONDS - (now - self.clear_start_time)
-                return f'CONFUSED (clearing in {remaining:.1f}s)', (0, 0, 255)
-            return 'CONFUSED', (0, 0, 255)
+                return f"CONFUSED (clearing in {remaining:.1f}s)", (0, 0, 255)
+            return "CONFUSED", (0, 0, 255)
         elif total > 0:
             remaining = self.CONFUSED_THRESHOLD_SECONDS - total
-            return f'THINKING ({remaining:.1f}s left)', (0, 165, 255)
+            return f"THINKING ({remaining:.1f}s left)", (0, 165, 255)
         else:
-            return 'NORMAL', (0, 200, 80)
-    
-    def detect_confusion(self, frame_bgr):
+            return "NORMAL", (0, 200, 80)
+
+    def detect_confusion(self, frame_bgr, draw: bool = False):
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
         # only run heavy face detection every N frames
@@ -142,18 +146,32 @@ class ConfuseDetector:
         face = self._face_cache
         emotion = self.predict(face, frame_rgb)
         confused = self.check_focus(emotion)
-        status_text, status_color = self.get_hud(emotion, confused)
 
-        cv2.putText(frame_bgr, status_text, (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, status_color, 2)
+        if draw:
+            status_text, status_color = self.get_hud(emotion, confused)
+            cv2.putText(
+                frame_bgr,
+                status_text,
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                status_color,
+                2,
+            )
+            if emotion is not None and face is not None:
+                x1, y1, x2, y2 = [int(v) for v in face]
+                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), status_color, 2)
+                cv2.putText(
+                    frame_bgr,
+                    emotion,
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    status_color,
+                    2,
+                )
 
-        if emotion is not None and face is not None:
-            x1, y1, x2, y2 = [int(v) for v in face]
-            cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), status_color, 2)
-            cv2.putText(frame_bgr, emotion, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-
-        return status_text == "CONFUSED"
+        return confused, emotion
 
     def run(self):
         cap = cv2.VideoCapture(0)
@@ -165,14 +183,14 @@ class ConfuseDetector:
         frame_count = 0
         DETECT_EVERY_N = 3  # run face detection every 3 frames
 
-        print(f'Running on: {DEVICE}')
-        print('Press Q to quit')
+        print(f"Running on: {DEVICE}")
+        print("Press Q to quit")
 
         while True:
             ret, frame_bgr = cap.read()
             if not ret:
                 break
-            
+
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
             # if frame_count % DETECT_EVERY_N == 0:
@@ -184,28 +202,40 @@ class ConfuseDetector:
             self._frame_count += 1
             face = self._face_cache
 
-
             emotion = self.predict(face, frame_rgb)
             confused = self.check_focus(emotion)
             status_text, status_color = self.get_hud(emotion, confused)
 
-            cv2.putText(frame_bgr, status_text, (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, status_color, 2)
-
+            cv2.putText(
+                frame_bgr,
+                status_text,
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                status_color,
+                2,
+            )
             if emotion is not None and face is not None:
                 x1, y1, x2, y2 = [int(v) for v in face]
                 cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), status_color, 2)
-                cv2.putText(frame_bgr, emotion, (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+                cv2.putText(
+                    frame_bgr,
+                    emotion,
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    status_color,
+                    2,
+                )
 
-            cv2.imshow('HSEmotion Inference [Q to quit]', frame_bgr)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            cv2.imshow("HSEmotion Inference [Q to quit]", frame_bgr)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
         cap.release()
         cv2.destroyAllWindows()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     model_name = "enet_b0_8_best_vgaf"
-    ConfuseDetector(model_name=model_name).run()
+    ConfuseDetector().run()

@@ -29,6 +29,12 @@ class ProcessTriggerResponse(BaseModel):
     sources_used: List[str] = Field(default_factory=list)
 
 
+class ClassifyIntentRequest(BaseModel):
+    """Request for semantic intent classification"""
+    text: str = Field(..., description="The message to classify")
+    intent: str = Field(..., description="The intent description to match against")
+
+
 class DetectorFrameRequest(BaseModel):
     """Request model for webcam frame analysis"""
     image_base64: str = Field(..., description="Base64 encoded camera frame")
