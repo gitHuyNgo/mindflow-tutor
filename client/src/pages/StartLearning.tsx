@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Mic, MicOff, Video, VideoOff, Monitor, ArrowRight, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { sessionStore } from "@/lib/sessionStore";
 
 const StartLearningPage = () => {
   const [step, setStep] = useState(1);
@@ -21,6 +22,8 @@ const StartLearningPage = () => {
   }, []);
   const camStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  // Flag: don't stop streams when navigating to session (Session.tsx takes ownership)
+  const handedOffToSession = useRef(false);
 
   const handleBack = useCallback(() => {
     camStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -85,8 +88,11 @@ const StartLearningPage = () => {
 
   useEffect(() => {
     return () => {
-      camStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      // Only stop streams if user backed out, not when handing off to session
+      if (!handedOffToSession.current) {
+        camStreamRef.current?.getTracks().forEach((t) => t.stop());
+        screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      }
     };
   }, []);
 
@@ -369,13 +375,24 @@ const StartLearningPage = () => {
                     </button>
                   </div>
 
-                  {/* Actions */}
                   <div className="flex justify-center gap-4 pt-2">
                     <Button variant="outline" size="lg" onClick={() => setStep(1)}>
                       <ArrowLeft className="w-4 h-4 mr-1" />
                       Back
                     </Button>
-                    <Button variant="hero" size="lg" disabled={!isSharing}>
+                    <Button
+                      variant="hero"
+                      size="lg"
+                      disabled={!isSharing}
+                      onClick={() => {
+                        handedOffToSession.current = true;
+                        sessionStore.camStream = camStreamRef.current;
+                        sessionStore.screenStream = screenStreamRef.current;
+                        sessionStore.micOn = micOn;
+                        sessionStore.camOn = camOn;
+                        navigate("/session");
+                      }}
+                    >
                       Begin Session
                       <ArrowRight className="w-4 h-4 ml-1" />
                     </Button>
