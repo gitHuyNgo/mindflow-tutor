@@ -12,6 +12,8 @@ import LoginSuccess from "./pages/LoginSuccess.tsx";
 import OAuthCallback from "./pages/OAuthCallback.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Session from "./pages/Session.tsx";
+import Dashboard from "./pages/Dashboard.tsx";
+import SessionUser from "./pages/SessionUser.tsx";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +32,8 @@ const App = () => (
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/oauth-callback" element={<OAuthCallback />} />
             <Route path="/session" element={<Session />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/session-user" element={<SessionUser />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

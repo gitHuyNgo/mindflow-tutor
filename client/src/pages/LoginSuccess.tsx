@@ -14,9 +14,16 @@ const LoginSuccessPage = () => {
 
   const firstName = user?.full_name?.split(" ")[0] || "there";
 
+  // Request camera + mic permissions early so Dashboard is ready immediately
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(stream => { stream.getTracks().forEach(t => t.stop()); })
+      .catch(() => { /* user denied — Dashboard handles gracefully */ });
+  }, []);
+
   useEffect(() => {
     const holdTimer = setTimeout(() => setLeaving(true), HOLD_MS);
-    const leaveTimer = setTimeout(() => navigate("/", { replace: true }), HOLD_MS + FADE_MS);
+    const leaveTimer = setTimeout(() => navigate("/session-user", { replace: true }), HOLD_MS + FADE_MS);
     return () => { clearTimeout(holdTimer); clearTimeout(leaveTimer); };
   }, [navigate]);
 

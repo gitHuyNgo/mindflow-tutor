@@ -88,8 +88,8 @@ class Orchestrator:
             
             # Step 5: Store messages in session memory
             user_content = user_query or f"[Confusion detected while viewing: {topic}]"
-            self.memory.add_message(session_id, "user", user_content, emotion="confused")
-            self.memory.add_message(session_id, "assistant", text_response)
+            await self.memory.add_message_async(session_id, "user", user_content, emotion="confused")
+            await self.memory.add_message_async(session_id, "assistant", text_response)
             
             # Step 6: Generate audio (done after returning text for faster response)
             audio_base64 = None
@@ -141,8 +141,8 @@ class Orchestrator:
             )
             
             # Store in memory
-            self.memory.add_message(session_id, "user", question)
-            self.memory.add_message(session_id, "assistant", text_response)
+            await self.memory.add_message_async(session_id, "user", question)
+            await self.memory.add_message_async(session_id, "assistant", text_response)
             
             # Generate audio
             audio_base64 = None

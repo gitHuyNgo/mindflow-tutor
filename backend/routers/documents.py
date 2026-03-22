@@ -1,5 +1,5 @@
 import os
-import shutil
+
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -17,28 +17,36 @@ router = APIRouter(tags=["documents"])
 
 
 def _get_uploads_dir() -> Path:
-    path = Path(os.environ.get("UPLOADS_DIR", "/app/data/uploads"))
+    path = Path(os.environ.get("UPLOADS_DIR", "./data/uploads"))
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+MAX_PDF_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 @router.post("/v1/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(file: UploadFile = File(...)):
     """Upload and index a PDF document"""
     try:
-        if not file.filename.lower().endswith('.pdf'):
+        if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-        justification = f"Uploading document: {file.filename}"
-        logger.info(justification)
-        
+        logger.info(f"Uploading document: {file.filename}")
 
         uploads_dir = _get_uploads_dir()
-        doc_id = str(uuid.uuid4())
+        doc_id    = str(uuid.uuid4())
         file_path = uploads_dir / f"{doc_id}_{file.filename}"
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # Stream to disk while enforcing size limit
+        written = 0
+        with open(file_path, "wb") as buf:
+            while chunk := await file.read(1024 * 256):  # 256 KB chunks
+                written += len(chunk)
+                if written > MAX_PDF_BYTES:
+                    file_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="PDF exceeds 50 MB limit")
+                buf.write(chunk)
 
         rag = get_rag_retriever()
         result = await rag.index_document(str(file_path), file.filename)

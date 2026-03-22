@@ -191,44 +191,92 @@ const SessionPage = () => {
     if (detectionAckTypeRef.current) {
       const ackType = detectionAckTypeRef.current;
       detectionAckTypeRef.current = null;
-
-      // Classify intent in parallel with potential AI query
-      const intent = ackType === 'distraction'
-        ? "the user is acknowledging they were distracted and will refocus on studying"
-        : "the user understands the topic and has no more questions about it";
-
-      let isAck = false;
-      try {
-        const r = await fetch("/api/v1/utils/classify-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, intent }),
-        });
-        isAck = (await r.json()).match === true;
-      } catch { }
-
-      // Always start 4s resume timer after first user message
-      if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
-      detectorResumeTimerRef.current = setTimeout(() => {
-        detectorPausedRef.current = false;
-        setDetectorState(null);
-        detectorResumeTimerRef.current = null;
-      }, 4000);
-
-      if (isAck) {
-        // Confirmed: send short ack message, no AI query
-        const ackMsg = ackType === 'distraction'
-          ? "That's the spirit! Let's keep going 💪"
-          : "Nice, we figured it out together 🙌";
-        addMessage("ai", ackMsg);
-        fetch(`/api/v1/tts/generate?text=${encodeURIComponent(ackMsg)}`, { method: "POST" })
-          .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
-        return;
-      }
-
-      // Not ack → do nothing, 4s timer already set
+      const capturedFrame = pendingConfusionFrameRef.current;
       pendingConfusionFrameRef.current = null;
-      return;
+
+      if (ackType === 'explained') {
+        // AI already explained — check if user fully understands now
+        let fullyUnderstood = false;
+        try {
+          const r = await fetch("/api/v1/utils/classify-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, intent: "the user fully understands the topic now and has no more questions" }),
+          });
+          fullyUnderstood = (await r.json()).match === true;
+        } catch { }
+        if (fullyUnderstood) {
+          // Resume detector
+          if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
+          detectorPausedRef.current = false;
+          setDetectorState(null);
+          const ackMsg = "Nice, we figured it out together 🙌";
+          addMessage("ai", ackMsg);
+          fetch(`/api/v1/tts/generate?text=${encodeURIComponent(ackMsg)}`, { method: "POST" })
+            .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
+          return;
+        }
+        // Not fully understood yet → keep detector paused, answer normally
+        detectionAckTypeRef.current = 'explained';
+
+      } else if (ackType === 'distraction') {
+        // Resume detector after a delay
+        if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
+        detectorResumeTimerRef.current = setTimeout(() => {
+          detectorPausedRef.current = false;
+          setDetectorState(null);
+          detectorResumeTimerRef.current = null;
+        }, 4000);
+        let isAck = false;
+        try {
+          const r = await fetch("/api/v1/utils/classify-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, intent: "the user is acknowledging they were distracted and will refocus on studying" }),
+          });
+          isAck = (await r.json()).match === true;
+        } catch { }
+        if (isAck) {
+          const ackMsg = "That's the spirit! Let's keep going 💪";
+          addMessage("ai", ackMsg);
+          fetch(`/api/v1/tts/generate?text=${encodeURIComponent(ackMsg)}`, { method: "POST" })
+            .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
+          return;
+        }
+        // Not ack → fall through to normal ask
+
+      } else {
+        // confusion: send captured frame + user message → AI explains
+        if (capturedFrame) {
+          setIsLoading(true);
+          try {
+            const res = await fetch("/api/v1/process-trigger", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ screen_capture: capturedFrame, session_id: sessionId, user_query: text }),
+            });
+            const data = await res.json();
+            addMessage("ai", data.text_response);
+            if (data.audio_base64) playAudio(data.audio_base64);
+            // Keep detector paused — wait to see if user fully understands
+            detectionAckTypeRef.current = 'explained';
+          } catch {
+            addMessage("ai", "Connection error. Please try again.");
+            detectorPausedRef.current = false;
+            setDetectorState(null);
+          } finally {
+            setIsLoading(false);
+          }
+          return;
+        }
+        // No frame → resume detector and fall through to normal ask
+        if (detectorResumeTimerRef.current) clearTimeout(detectorResumeTimerRef.current);
+        detectorResumeTimerRef.current = setTimeout(() => {
+          detectorPausedRef.current = false;
+          setDetectorState(null);
+          detectorResumeTimerRef.current = null;
+        }, 4000);
+      }
     }
 
     // ── Send to AI ──
@@ -287,7 +335,7 @@ const SessionPage = () => {
     camVideo?.addEventListener("enterpictureinpicture", onEnterVideoPiP);
     camVideo?.addEventListener("leavepictureinpicture", onLeaveVideoPiP);
 
-    const greeting = "Hey! I'm your learning companion. Let's learn together!";
+    const greeting = "Hey! I'm your AI Tutor. Ask me anything!";
     addMessage("ai", greeting);
     fetch(`/api/v1/tts/generate?text=${encodeURIComponent(greeting)}`, { method: "POST" })
       .then(r => r.json()).then(d => { if (d.audio_base64) playAudio(d.audio_base64); }).catch(() => {});
@@ -348,7 +396,7 @@ const SessionPage = () => {
   const detectorPausedRef = useRef(false);
   const detectorResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingConfusionFrameRef = useRef<string | null>(null);
-  const detectionAckTypeRef = useRef<'confusion' | 'distraction' | null>(null);
+  const detectionAckTypeRef = useRef<'confusion' | 'distraction' | 'explained' | null>(null);
 
   useEffect(() => {
     if (!camOn) { setDetectorState(null); return; }
@@ -378,11 +426,15 @@ const SessionPage = () => {
 
           // Capture current screen frame (what the user is studying)
           const sv = screenCaptureRef.current;
-          if (sv && screenStreamRef.current && sv.videoWidth > 0) {
+          if (sv && screenStreamRef.current) {
+            const track    = screenStreamRef.current.getVideoTracks()[0];
+            const settings = track?.getSettings() ?? {};
+            const w = sv.videoWidth  || settings.width  || 1280;
+            const h = sv.videoHeight || settings.height || 720;
             const sc = document.createElement("canvas");
-            sc.width = sv.videoWidth || 1280;
-            sc.height = sv.videoHeight || 720;
-            sc.getContext("2d")!.drawImage(sv, 0, 0);
+            sc.width  = w;
+            sc.height = h;
+            sc.getContext("2d")!.drawImage(sv, 0, 0, w, h);
             pendingConfusionFrameRef.current = sc.toDataURL("image/jpeg", 0.7).split(",")[1];
           } else {
             pendingConfusionFrameRef.current = null;
@@ -577,10 +629,10 @@ const SessionPage = () => {
           return `<div style="display:flex;gap:6px;justify-content:${isUser ? "flex-end" : "flex-start"};align-items:flex-end">
             ${!isUser ? `<div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,rgba(138,180,248,.35),rgba(138,180,248,.12));border:1px solid rgba(138,180,248,.35);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 10px rgba(138,180,248,.15)"><span class="ms" style="font-size:14px;color:rgba(138,180,248,.9)">smart_toy</span></div>` : ""}
             <div style="max-width:83%;
-              background:${isUser ? "rgba(138,180,248,.2)" : "rgba(255,255,255,.07)"};
-              border:1px solid ${isUser ? "rgba(138,180,248,.32)" : "rgba(255,255,255,.1)"};
-              color:rgba(255,255,255,${isUser ? ".95" : ".85"});
-              border-radius:18px;padding:6px 11px;font-size:13.5px;line-height:1.55;
+              background:${isUser ? "rgba(138,180,248,.2)" : "rgba(138,180,248,.07)"};
+              border:1px solid ${isUser ? "rgba(138,180,248,.32)" : "rgba(138,180,248,.18)"};
+              color:rgba(255,255,255,${isUser ? ".95" : ".9"});
+              border-radius:18px;padding:6px 11px;font-size:14.5px;line-height:1.55;
               font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;letter-spacing:0.01em;
               border-bottom-${isUser ? "right" : "left"}-radius:4px${isUser ? ";box-shadow:0 2px 10px rgba(138,180,248,.1)" : ""}">
               ${imgHtml}${m.content}
@@ -593,7 +645,7 @@ const SessionPage = () => {
           chatEl.innerHTML = last3.map(renderMsg).join("") + (loading ? `
             <div style="display:flex;gap:6px;align-items:flex-end">
               <div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,rgba(138,180,248,.35),rgba(138,180,248,.12));border:1px solid rgba(138,180,248,.35);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 10px rgba(138,180,248,.15)"><span class="ms" style="font-size:14px;color:rgba(138,180,248,.9)">smart_toy</span></div>
-              <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:18px;border-bottom-left-radius:4px;padding:9px 13px;display:flex;gap:4px;align-items:center">
+              <div style="background:rgba(138,180,248,.07);border:1px solid rgba(138,180,248,.18);border-radius:18px;border-bottom-left-radius:4px;padding:9px 13px;display:flex;gap:4px;align-items:center">
                 ${[0, 160, 320].map(d => `<span style="width:5px;height:5px;border-radius:50%;background:rgba(138,180,248,.7);display:inline-block;animation:pip-bounce 1.2s ${d}ms infinite"></span>`).join("")}
               </div>
             </div>` : "");
@@ -776,10 +828,10 @@ const SessionPage = () => {
                     </div>
                   )}
                   <div
-                    className={`max-w-[72%] rounded-[18px] px-4 py-2.5 text-[15px] leading-relaxed shadow-sm ${
+                    className={`max-w-[72%] rounded-[18px] px-4 py-2.5 text-[16px] leading-relaxed shadow-sm ${
                       msg.role === "user"
                         ? "bg-[rgba(138,180,248,0.16)] border border-[rgba(138,180,248,0.28)] text-white/95 rounded-br-[4px] shadow-[0_2px_12px_rgba(138,180,248,0.1)]"
-                        : "bg-white/[0.07] border border-white/[0.1] text-white/85 rounded-bl-[4px]"
+                        : "bg-[rgba(138,180,248,0.06)] border border-[rgba(138,180,248,0.15)] text-white/90 rounded-bl-[4px]"
                     }`}
                     style={{ fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif" }}
                   >
@@ -802,7 +854,7 @@ const SessionPage = () => {
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/35 to-primary/10 border border-primary/35 flex items-center justify-center shrink-0 shadow-[0_0_14px_rgba(138,180,248,0.18)]">
                   <span style={{ fontFamily: "'Material Symbols Rounded'", fontSize: 16, lineHeight: 1, color: "rgba(138,180,248,0.9)", fontWeight: "normal" }}>smart_toy</span>
                 </div>
-                <div className="bg-white/[0.07] border border-white/[0.1] rounded-[18px] rounded-bl-[4px] px-5 py-3.5 flex gap-1.5 items-center">
+                <div className="bg-[rgba(138,180,248,0.06)] border border-[rgba(138,180,248,0.15)] rounded-[18px] rounded-bl-[4px] px-5 py-3.5 flex gap-1.5 items-center">
                   {[0, 130, 260].map(d => (
                     <div key={d} className="w-1.5 h-1.5 rounded-full bg-primary/70 animate-bounce"
                       style={{ animationDelay: `${d}ms` }} />
@@ -877,7 +929,7 @@ const SessionPage = () => {
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sendMessage(inputText); } }}
               placeholder={isRecording ? "Listening..." : "Type your question..."}
               disabled={isRecording}
-              className="flex-1 h-11 rounded-3xl bg-white/[0.05] border border-white/[0.1] px-5 text-[13px] text-white/90 placeholder:text-white/22 focus:outline-none focus:border-[rgba(138,180,248,0.4)] focus:bg-white/[0.07] transition-all disabled:cursor-not-allowed"
+              className="flex-1 h-11 rounded-3xl bg-white/[0.05] border border-white/[0.1] px-5 text-[14px] text-white/90 placeholder:text-white/30 focus:outline-none focus:border-[rgba(138,180,248,0.4)] focus:bg-white/[0.07] transition-all disabled:cursor-not-allowed"
               style={{ fontFamily: "'DM Sans', sans-serif" }}
             />
             <button onClick={toggleRecording} title={isRecording ? "Stop recording" : "Speak to AI"}
