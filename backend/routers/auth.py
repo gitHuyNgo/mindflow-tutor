@@ -462,6 +462,65 @@ async def facebook_callback(code: str = "", state: str = "", error: str = ""):
     return RedirectResponse(_oauth_success_redirect(app_url, user["id"], email, full_name))
 
 
+# ── Profile ───────────────────────────────────────────────────────────────────
+
+from typing import Optional as _Opt
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: _Opt[str] = None
+    avatar_url: _Opt[str] = None   # base64 data-URL or external URL
+
+
+@router.patch("/profile")
+async def update_profile(
+    body: ProfileUpdateRequest,
+    authorization: str = "",
+):
+    """Update display name and/or avatar. Requires Authorization: Bearer <token>."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if body.full_name is not None:
+        if err := _validate_full_name(body.full_name):
+            raise HTTPException(status_code=400, detail=err)
+
+    db = _get_db()
+    update: dict = {}
+    if body.full_name is not None:
+        update["full_name"] = body.full_name
+    if body.avatar_url is not None:
+        if len(body.avatar_url) > 700_000:
+            raise HTTPException(status_code=400, detail="Avatar image too large (max 500 KB)")
+        update["avatar_url"] = body.avatar_url
+
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    result = await db.users.find_one_and_update(
+        {"id": user_id},
+        {"$set": update},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "id":         result["id"],
+        "email":      result["email"],
+        "full_name":  result.get("full_name", ""),
+        "avatar_url": result.get("avatar_url", ""),
+    }
+
+
 # ── Email/password endpoints (existing) ──────────────────────────────────────
 
 class ResendRequest(BaseModel):

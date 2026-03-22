@@ -15,7 +15,12 @@
       "Read(//c/Users/**)",
       "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -c \"import numpy; print\\(numpy.__version__\\)\")",
       "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip install \"numpy>=2.0\" \"mediapipe>=0.10.14\" --quiet)",
-      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip check)"
+      "Bash(/c/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip check)",
+      "Bash(C:/Users/LEGION/.conda/envs/mind-tutor/python.exe -m pip list)",
+      "Bash(C:/Users/LEGION/.conda/envs/mind-tutor/python.exe -m py_compile c:/GIAHUY/github/mindflow-tutor/backend/routers/documents.py c:/GIAHUY/github/mindflow-tutor/backend/engines/rag_retriever.py c:/GIAHUY/github/mindflow-tutor/backend/persistence/chroma_store.py)",
+      "Bash(python -c \"from providers.openai_provider import OpenAIProvider; print\\(''ok''\\)\")",
+      "Bash(python -m py_compile providers/openai_provider.py)",
+      "Bash(python -m py_compile engines/combined_detector_engine.py)"
     ],
     "additionalDirectories": [
       "C:\\Users\\LEGION\\.conda\\envs\\mind-tutor\\Lib\\site-packages\\hsemotion"

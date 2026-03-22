@@ -64,6 +64,9 @@ async def _seed_admin():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await _seed_admin()
+    # Inject MongoDB into session memory so messages are persisted
+    from persistence.session_memory import get_session_memory
+    get_session_memory().set_db(db)
     yield
     client.close()
 

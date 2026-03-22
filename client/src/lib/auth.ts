@@ -4,6 +4,7 @@ export interface AuthUser {
   id: string;
   email: string;
   full_name: string;
+  avatar_url?: string;
 }
 
 export interface LoginResponse {
@@ -45,4 +46,16 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
+
+  updateProfile: (token: string, body: { full_name?: string; avatar_url?: string }) =>
+    fetch(`${BASE}/profile`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    }).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail ?? `Request failed (${res.status})`);
+      return data as AuthUser;
+    }),
 };
+
