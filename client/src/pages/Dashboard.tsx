@@ -10,6 +10,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { saveSession } from "./SessionUser";
 import ProfilePanel from "@/components/ProfilePanel";
+import { captureScreenFrame } from "@/lib/captureScreen";
 
 /* ────────── types ────────── */
 type Message = {
@@ -508,18 +509,11 @@ const DashboardPage = () => {
           setDetectorState("confused");
           detectorPausedRef.current    = true;
           detectionAckTypeRef.current  = "confusion";
-          const sv = screenCaptureRef.current;
-          if (sv && screenStreamRef.current) {
-            const track    = screenStreamRef.current.getVideoTracks()[0];
-            const settings = track?.getSettings() ?? {};
-            const w = sv.videoWidth  || settings.width  || 1280;
-            const h = sv.videoHeight || settings.height || 720;
-            const sc = document.createElement("canvas");
-            sc.width  = w;
-            sc.height = h;
-            sc.getContext("2d")!.drawImage(sv, 0, 0, w, h);
-            pendingConfusionFrameRef.current = sc.toDataURL("image/jpeg", 0.7).split(",")[1];
-          } else { pendingConfusionFrameRef.current = null; }
+          if (screenStreamRef.current) {
+            pendingConfusionFrameRef.current = await captureScreenFrame(screenStreamRef.current);
+          } else {
+            pendingConfusionFrameRef.current = null;
+          }
           const checkIn = "Hey, it looks like something might be confusing here 👀 Feel free to ask me anything!";
           addMessage("ai", checkIn);
           fetch(`/api/v1/tts/generate?text=${encodeURIComponent(checkIn)}`, { method: "POST" })

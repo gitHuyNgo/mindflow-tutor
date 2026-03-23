@@ -31,11 +31,23 @@ class ChromaStore:
             model_name="text-embedding-3-small",
         )
 
-        self.collection = self.client.get_or_create_collection(
-            name="mindflow_documents",
-            embedding_function=embedding_fn,
-            metadata={"hnsw:space": "cosine"},
-        )
+        try:
+            self.collection = self.client.get_or_create_collection(
+                name="mindflow_documents",
+                embedding_function=embedding_fn,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except Exception as e:
+            if "embedding function" in str(e).lower() or "conflict" in str(e).lower():
+                logger.warning("Embedding function conflict — recreating collection.")
+                self.client.delete_collection("mindflow_documents")
+                self.collection = self.client.create_collection(
+                    name="mindflow_documents",
+                    embedding_function=embedding_fn,
+                    metadata={"hnsw:space": "cosine"},
+                )
+            else:
+                raise
 
     # ── write ──────────────────────────────────────────────────────────────────
 

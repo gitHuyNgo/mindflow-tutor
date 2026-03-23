@@ -5,7 +5,6 @@ from engines.vision_engine import get_vision_engine
 from engines.rag_retriever import get_rag_retriever
 from providers.openai_provider import get_openai_provider
 from providers.tavily_provider import get_tavily_provider
-from providers.elevenlabs_provider import get_elevenlabs_provider
 from persistence.session_memory import get_session_memory
 from core.prompts import TUTOR_SYSTEM_PROMPT, CONFUSION_RESPONSE_TEMPLATE
 
@@ -19,7 +18,6 @@ class Orchestrator:
         self.vision = get_vision_engine()
         self.rag = get_rag_retriever()
         self.openai = get_openai_provider()
-        self.tts = get_elevenlabs_provider()
         self.memory = get_session_memory()
     
     async def process_confusion_trigger(
@@ -91,10 +89,10 @@ class Orchestrator:
             await self.memory.add_message_async(session_id, "user", user_content, emotion="confused")
             await self.memory.add_message_async(session_id, "assistant", text_response)
             
-            # Step 6: Generate audio (done after returning text for faster response)
+            # Step 6: Generate audio
             audio_base64 = None
             try:
-                audio_base64 = self.tts.generate_speech_base64(text_response)
+                audio_base64 = await self.openai.generate_speech_base64(text_response)
             except Exception as e:
                 logger.warning(f"TTS generation failed: {e}")
             
@@ -147,7 +145,7 @@ class Orchestrator:
             # Generate audio
             audio_base64 = None
             try:
-                audio_base64 = self.tts.generate_speech_base64(text_response)
+                audio_base64 = await self.openai.generate_speech_base64(text_response)
             except Exception as e:
                 logger.warning(f"TTS generation failed: {e}")
             

@@ -2,6 +2,8 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
@@ -96,6 +98,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Serve React static files (production build) ──────────────────────────────
+_STATIC_DIR = ROOT_DIR / "static"
+if _STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(_STATIC_DIR / "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        """Catch-all: serve React index.html for any non-API route."""
+        index = _STATIC_DIR / "index.html"
+        return FileResponse(str(index))
 
 if __name__ == "__main__":
     import uvicorn

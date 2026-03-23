@@ -20,7 +20,11 @@
       "Bash(C:/Users/LEGION/.conda/envs/mind-tutor/python.exe -m py_compile c:/GIAHUY/github/mindflow-tutor/backend/routers/documents.py c:/GIAHUY/github/mindflow-tutor/backend/engines/rag_retriever.py c:/GIAHUY/github/mindflow-tutor/backend/persistence/chroma_store.py)",
       "Bash(python -c \"from providers.openai_provider import OpenAIProvider; print\\(''ok''\\)\")",
       "Bash(python -m py_compile providers/openai_provider.py)",
-      "Bash(python -m py_compile engines/combined_detector_engine.py)"
+      "Bash(python -m py_compile engines/combined_detector_engine.py)",
+      "Bash(az --version)",
+      "Bash(az account:*)",
+      "Bash(where az:*)",
+      "Bash(net start:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\LEGION\\.conda\\envs\\mind-tutor\\Lib\\site-packages\\hsemotion"

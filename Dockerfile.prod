@@ -1,0 +1,52 @@
+# ── Stage 1: Build React frontend ──────────────────────────────────────────
+FROM node:20-slim AS frontend-build
+
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm ci --legacy-peer-deps
+
+COPY client/ ./
+RUN npm run build
+# Output: /app/client/dist
+
+
+# ── Stage 2: Python backend + serve static files ────────────────────────────
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# System deps for OpenCV / ML models
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps
+COPY backend/requirements-web.txt ./requirements-web.txt
+COPY backend/requirements-ai.txt  ./requirements-ai.txt 2>/dev/null || true
+RUN pip install --upgrade pip \
+ && pip install -r requirements-web.txt \
+ && ([ -f requirements-ai.txt ] && pip install -r requirements-ai.txt || true)
+
+# Copy backend source
+COPY backend/ ./
+
+# Copy built frontend into static/
+COPY --from=frontend-build /app/client/dist ./static
+
+# Patch server.py to serve React static files
+# (handled in server.py via StaticFiles mount — see note below)
+
+EXPOSE 8000
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

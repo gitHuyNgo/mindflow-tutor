@@ -18,7 +18,7 @@ class OpenAIProvider:
         self.model = os.environ.get("OPENAI_MODEL", "gpt-4o")
         self.tts_model = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
         self.tts_voice = os.environ.get("OPENAI_TTS_VOICE", "alloy")
-        self.stt_model = os.environ.get("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
+        self.stt_model = os.environ.get("OPENAI_STT_MODEL", "whisper-1")
     
     async def analyze_image(self, image_base64: str, prompt: str) -> str:
         """Analyze an image using GPT-4o Vision"""
@@ -172,13 +172,14 @@ class OpenAIProvider:
             raise
 
     async def speech_to_text(self, audio_bytes: bytes, filename: str = "audio.webm") -> str:
-        """Transcribe audio using OpenAI gpt-4o-mini-transcribe"""
+        """Transcribe audio using OpenAI — always outputs English."""
         try:
             ext = filename.rsplit(".", 1)[-1].lower()
             result = await self.client.audio.transcriptions.create(
                 model=self.stt_model,
                 file=(filename, io.BytesIO(audio_bytes), f"audio/{ext}"),
                 response_format="text",
+                language="en",
             )
             return result if isinstance(result, str) else (result.text or "")
         except Exception as e:
