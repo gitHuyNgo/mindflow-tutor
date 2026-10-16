@@ -7,7 +7,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from schemas.models import ProcessTriggerRequest, DetectorFrameRequest, ClassifyIntentRequest
 from engines.orchestrator import get_orchestrator
 from providers.openai_provider import get_openai_provider
-from core.auth import get_current_user, get_optional_current_user
+from core.auth import get_current_user
+from persistence.session_memory import get_session_memory
 
 MAX_FRAME_B64_LEN = 2_000_000  # ~1.5 MB image max
 logger = logging.getLogger(__name__)
@@ -17,11 +18,21 @@ router = APIRouter(tags=["ai"])
 @router.post("/v1/process-trigger", response_model=dict)
 async def process_trigger(
     request: ProcessTriggerRequest,
-    current_user: Optional[dict] = Depends(get_optional_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Process confusion trigger with screen capture"""
+    """Process confusion trigger with screen capture. Requires authentication."""
     try:
-        user_id = current_user["id"] if current_user else request.user_id
+        user_id = current_user["id"]
+        # Strictly reject client-supplied user_id spoofing
+        if request.user_id and request.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden: user_id mismatch with authenticated token")
+
+        # Verify session ownership
+        memory = get_session_memory()
+        has_access = await memory.check_session_access_async(request.session_id, user_id)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Forbidden: Not authorized to access this session")
+
         orchestrator = get_orchestrator()
         result = await orchestrator.process_confusion_trigger(
             screen_capture=request.screen_capture,
@@ -38,6 +49,10 @@ async def process_trigger(
             "sources_used": result.get("sources_used", []),
             "success": result.get("success", True)
         }
+    except HTTPException:
+        raise
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
     except Exception as e:
         logger.error(f"Error in process-trigger: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -47,14 +62,19 @@ async def process_trigger(
 async def ask_question(
     question: str,
     session_id: Optional[str] = None,
-    current_user: Optional[dict] = Depends(get_optional_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Direct question endpoint"""
+    """Direct question endpoint. Requires authentication and session ownership check."""
     try:
         if not session_id:
             session_id = str(uuid.uuid4())
 
-        user_id = current_user["id"] if current_user else None
+        user_id = current_user["id"]
+        memory = get_session_memory()
+        has_access = await memory.check_session_access_async(session_id, user_id)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Forbidden: Not authorized to access this session")
+
         orchestrator = get_orchestrator()
         result = await orchestrator.process_direct_question(
             question=question,
@@ -68,10 +88,13 @@ async def ask_question(
             "sources_used": result.get("sources_used", []),
             "success": result.get("success", True)
         }
+    except HTTPException:
+        raise
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
     except Exception as e:
         logger.error(f"Error in ask: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/v1/detector/frame", response_model=dict)
 async def detect_frame(
@@ -86,10 +109,20 @@ async def detect_frame(
             status_code=400,
             detail=f"Frame payload too large (max {MAX_FRAME_B64_LEN} characters)",
         )
+
+    user_id = current_user["id"]
+    if request.user_id and request.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: user_id mismatch with authenticated token")
+
+    if request.session_id:
+        memory = get_session_memory()
+        has_access = await memory.check_session_access_async(request.session_id, user_id)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Forbidden: Not authorized to access this session")
+
     try:
         from engines.combined_detector_engine import get_combined_detector_engine
         detector = get_combined_detector_engine()
-        user_id = current_user.get("id", "user")
         session_key = f"{user_id}:{request.session_id}" if request.session_id else user_id
         result = await detector.detect_from_base64_async(request.image_base64, session_id=session_key)
         return result

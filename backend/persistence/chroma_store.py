@@ -66,6 +66,9 @@ class ChromaStore:
         ids: Optional[List[str]] = None,
         user_id: Optional[str] = None,
     ):
+        if not user_id or not str(user_id).strip():
+            raise ValueError("Tenant user_id is required to add documents to ChromaDB")
+
         if ids is None:
             ids = [str(uuid.uuid4()) for _ in documents]
 
@@ -73,46 +76,43 @@ class ChromaStore:
         enriched_metadatas = []
         for meta in metadatas:
             m = dict(meta) if meta else {}
-            if user_id and "user_id" not in m:
-                m["user_id"] = str(user_id)
-            elif "user_id" not in m:
-                m["user_id"] = "default"
+            m["user_id"] = str(user_id)
             enriched_metadatas.append(m)
 
         self.collection.add(documents=documents, metadatas=enriched_metadatas, ids=ids)
-        logger.info(f"ChromaDB: added {len(documents)} chunks (user_id={user_id or 'default'})")
+        logger.info(f"ChromaDB: added {len(documents)} chunks (user_id={user_id})")
 
     def delete_by_source(self, source: str, user_id: Optional[str] = None):
-        where_clause: dict
-        if user_id:
-            where_clause = {"$and": [{"source": source}, {"user_id": str(user_id)}]}
-        else:
-            where_clause = {"source": source}
+        if not user_id or not str(user_id).strip():
+            raise ValueError("Tenant user_id is required to delete documents from ChromaDB")
+
+        where_clause = {"$and": [{"source": source}, {"user_id": str(user_id)}]}
 
         results = self.collection.get(where=where_clause, include=["metadatas"])
         if results["ids"]:
             self.collection.delete(ids=results["ids"])
             logger.info(f"ChromaDB: deleted {len(results['ids'])} chunks for '{source}' (user_id={user_id})")
-
     # ── read ───────────────────────────────────────────────────────────────────
 
     def query(self, query_text: str, n_results: int = 5, user_id: Optional[str] = None) -> dict:
+        if not user_id or not str(user_id).strip():
+            raise ValueError("Tenant user_id is required for ChromaDB queries")
+
         # Clamp to actual collection size to avoid chromadb error
         count = self.collection.count()
         if count == 0:
             return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
         n = min(n_results, count)
 
-        where_clause = {"user_id": str(user_id)} if user_id else None
+        where_clause = {"user_id": str(user_id)}
 
         # Verify if any documents match this tenant before querying
-        if where_clause:
-            tenant_docs = self.collection.get(where=where_clause, limit=1)
-            if not tenant_docs or not tenant_docs.get("ids"):
-                return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
-            n = min(n, len(self.collection.get(where=where_clause).get("ids", [])))
-            if n == 0:
-                return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+        tenant_docs = self.collection.get(where=where_clause, limit=1)
+        if not tenant_docs or not tenant_docs.get("ids"):
+            return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+        n = min(n, len(self.collection.get(where=where_clause).get("ids", [])))
+        if n == 0:
+            return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
 
         return self.collection.query(
             query_texts=[query_text],
@@ -122,14 +122,16 @@ class ChromaStore:
         )
 
     def get_document_count(self, user_id: Optional[str] = None) -> int:
-        if user_id:
-            docs = self.collection.get(where={"user_id": str(user_id)})
-            return len(docs.get("ids", []))
-        return self.collection.count()
+        if not user_id or not str(user_id).strip():
+            raise ValueError("Tenant user_id is required to get document count")
+        docs = self.collection.get(where={"user_id": str(user_id)})
+        return len(docs.get("ids", []))
 
     def list_sources(self, user_id: Optional[str] = None) -> List[str]:
-        where_clause = {"user_id": str(user_id)} if user_id else None
-        results = self.collection.get(where=where_clause, include=["metadatas"]) if where_clause else self.collection.get(include=["metadatas"])
+        if not user_id or not str(user_id).strip():
+            raise ValueError("Tenant user_id is required to list document sources")
+        where_clause = {"user_id": str(user_id)}
+        results = self.collection.get(where=where_clause, include=["metadatas"])
         sources: set = set()
         for meta in results.get("metadatas", []):
             if meta and "source" in meta:

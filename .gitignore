@@ -39,6 +39,7 @@ htmlcov/
 
 # ── Runtime data (vector store, uploads, local DBs) ────────────────────
 backend/data/
+data/
 *.sqlite3
 *.db
 

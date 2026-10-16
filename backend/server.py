@@ -62,6 +62,8 @@ async def _seed_admin():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from core.auth import validate_jwt_secret
+    validate_jwt_secret()
     await _seed_admin()
     # Inject MongoDB into session memory so messages are persisted
     from persistence.session_memory import get_session_memory
@@ -88,6 +90,15 @@ api_router.include_router(conversations_router)
 api_router.include_router(search_router)
 app.include_router(api_router)
 
+# Expose /metrics and /health at the root level for standard Prometheus/k8s scrapers
+from monitoring.metrics import MetricsMiddleware, export_prometheus_text
+from fastapi.responses import Response
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    return Response(content=export_prometheus_text(), media_type="text/plain; version=0.0.4; charset=utf-8")
+
+app.add_middleware(MetricsMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

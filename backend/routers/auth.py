@@ -7,6 +7,12 @@ import smtplib
 import asyncio
 import logging
 import unicodedata
+import secrets
+import hashlib
+import smtplib
+import asyncio
+import logging
+import unicodedata
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -44,9 +50,9 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
 def _create_jwt(data: dict, expire_hours: int) -> str:
     payload = data.copy()
+    payload.setdefault("type", "access")
     payload["exp"] = datetime.now(timezone.utc) + timedelta(hours=expire_hours)
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
 
 # ── Database helper ───────────────────────────────────────────────────────────
 
@@ -310,17 +316,88 @@ def _oauth_redirect_uri(provider: str) -> str:
     return f"{app_url}/api/auth/{provider}/callback"
 
 
-def _oauth_success_redirect(app_url: str, user_id: str, email: str, full_name: str) -> str:
+class OAuthExchangeRequest(BaseModel):
+    code: str
+
+
+_memory_exchange_store: dict = {}
+
+
+async def _create_oauth_exchange_code(user_id: str, email: str, full_name: str) -> str:
+    raw_code = secrets.token_urlsafe(32)
+    code_hash = hashlib.sha256(raw_code.encode("utf-8")).hexdigest()
+    exp = datetime.now(timezone.utc) + timedelta(minutes=2)
+
+    try:
+        db = _get_db()
+        await db.oauth_exchange_codes.insert_one({
+            "code_hash": code_hash,
+            "user_id": user_id,
+            "email": email,
+            "full_name": full_name,
+            "expires_at": exp,
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.warning(f"Could not persist exchange code to MongoDB, using fallback store: {e}")
+        _memory_exchange_store[code_hash] = {
+            "user_id": user_id,
+            "email": email,
+            "full_name": full_name,
+            "expires_at": exp,
+        }
+    return raw_code
+
+
+async def _oauth_success_redirect(app_url: str, user_id: str, email: str, full_name: str) -> str:
+    code = await _create_oauth_exchange_code(user_id, email, full_name)
+    return f"{app_url}/oauth-callback?code={code}"
+
+
+@router.post("/oauth/exchange", response_model=TokenResponse)
+async def exchange_oauth_code(body: OAuthExchangeRequest):
+    """Exchange a short-lived single-use random OAuth code for an access token via atomic database deletion."""
+    if not body.code or len(body.code) < 16:
+        raise HTTPException(status_code=400, detail="Invalid exchange code")
+
+    code_hash = hashlib.sha256(body.code.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    doc = None
+
+    try:
+        db = _get_db()
+        doc = await db.oauth_exchange_codes.find_one_and_delete({
+            "code_hash": code_hash,
+            "expires_at": {"$gt": now},
+        })
+    except Exception as e:
+        logger.warning(f"MongoDB exchange code query error: {e}")
+
+    if not doc and code_hash in _memory_exchange_store:
+        mem_item = _memory_exchange_store.pop(code_hash, None)
+        if mem_item and mem_item["expires_at"] > now:
+            doc = mem_item
+
+    if not doc:
+        raise HTTPException(status_code=400, detail="Invalid, expired, or already used exchange code")
+
+    user_id = doc["user_id"]
+    email = doc.get("email", "")
+    full_name = doc.get("full_name", "")
+
     access_token = _create_jwt(
-        {"sub": user_id, "email": email},
+        {"sub": user_id, "email": email, "type": "access"},
         expire_hours=ACCESS_TOKEN_EXPIRE_HOURS,
     )
-    user_b64 = base64.urlsafe_b64encode(
-        json.dumps({"id": user_id, "email": email, "full_name": full_name}).encode()
-    ).decode()
-    return f"{app_url}/oauth-callback?token={access_token}&user={user_b64}"
 
-
+    return TokenResponse(
+        access_token=access_token,
+        user={
+            "id": user_id,
+            "email": email,
+            "full_name": full_name,
+        },
+    )
 async def _upsert_oauth_user(email: str, full_name: str, provider: str) -> dict:
     db = _get_db()
     user = await db.users.find_one({"email": email})
@@ -399,7 +476,8 @@ async def google_callback(code: str = "", state: str = "", error: str = ""):
         return RedirectResponse(f"{app_url}/login?error=no_email")
 
     user = await _upsert_oauth_user(email, full_name, "google")
-    return RedirectResponse(_oauth_success_redirect(app_url, user["id"], email, full_name))
+    redirect_url = await _oauth_success_redirect(app_url, user["id"], email, full_name)
+    return RedirectResponse(redirect_url)
 
 
 # ── Facebook OAuth ────────────────────────────────────────────────────────────
@@ -459,7 +537,8 @@ async def facebook_callback(code: str = "", state: str = "", error: str = ""):
         return RedirectResponse(f"{app_url}/login?error=no_email")
 
     user = await _upsert_oauth_user(email, full_name, "facebook")
-    return RedirectResponse(_oauth_success_redirect(app_url, user["id"], email, full_name))
+    redirect_url = await _oauth_success_redirect(app_url, user["id"], email, full_name)
+    return RedirectResponse(redirect_url)
 
 
 # ── Profile ───────────────────────────────────────────────────────────────────

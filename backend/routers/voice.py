@@ -19,19 +19,28 @@ active_voice_sessions: Dict[str, dict] = {}
 
 
 @router.websocket("/v1/voice")
-async def voice_websocket(websocket: WebSocket):
+async def voice_websocket(websocket: WebSocket, token: Optional[str] = None):
     """
     WebSocket endpoint for real-time voice conversation.
 
     Protocol:
     - Client sends: {"type": "audio", "data": "<base64 PCM audio>"}
     - Client sends: {"type": "end_speech"} when user stops talking
-    - Client sends: {"type": "start_session", "session_id": "..."}
+    - Client sends: {"type": "start_session", "session_id": "...", "token": "..."}
     - Server sends: {"type": "transcription", "text": "..."}
     - Server sends: {"type": "response", "text": "...", "audio": "<base64 mp3>"}
     - Server sends: {"type": "status", "status": "listening|processing|speaking"}
     """
     await websocket.accept()
+
+    current_user_id: Optional[str] = None
+    if token:
+        try:
+            from core.auth import decode_token
+            user = decode_token(token)
+            current_user_id = user["id"]
+        except Exception as e:
+            logger.warning(f"Voice WebSocket token invalid: {e}")
 
     session_id = str(uuid.uuid4())
     audio_processor = AudioProcessor(sample_rate=16000, vad_threshold=0.3)
@@ -42,11 +51,12 @@ async def voice_websocket(websocket: WebSocket):
     conversation_history = []
     audio_buffer = []
 
-    logger.info(f"Voice WebSocket connected: {session_id}")
+    logger.info(f"Voice WebSocket connected: {session_id} (user_id={current_user_id})")
 
     await websocket.send_json({
         "type": "session_started",
-        "session_id": session_id
+        "session_id": session_id,
+        "authenticated": current_user_id is not None
     })
 
     try:
@@ -91,7 +101,11 @@ async def voice_websocket(websocket: WebSocket):
                                     "text": transcription
                                 })
 
-                                rag_context = rag.get_context(transcription) if rag else ""
+                                rag_context = (
+                                    rag.get_context(transcription, user_id=current_user_id)
+                                    if (rag and current_user_id)
+                                    else ""
+                                )
 
                                 conversation_history.append({
                                     "role": "user",
@@ -110,8 +124,8 @@ async def voice_websocket(websocket: WebSocket):
                                     "content": ai_response
                                 })
 
-                                memory.add_message(session_id, "user", transcription)
-                                memory.add_message(session_id, "assistant", ai_response)
+                                memory.add_message(session_id, "user", transcription, user_id=current_user_id)
+                                memory.add_message(session_id, "assistant", ai_response, user_id=current_user_id)
 
                                 await websocket.send_json({"type": "status", "status": "speaking"})
 

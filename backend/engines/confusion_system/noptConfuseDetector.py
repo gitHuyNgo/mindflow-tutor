@@ -33,6 +33,10 @@ try:
 except ImportError:
     from download import download_dnn_model, PROTOTXT_PATH, WEIGHTS_PATH
 
+try:
+    from .confusion_calibrator import ConfusionCalibrator
+except ImportError:
+    from engines.confusion_system.confusion_calibrator import ConfusionCalibrator
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -51,6 +55,8 @@ class ConfusionState:
         self.is_confused: bool = False
         self.face_cache = None
         self.frame_count: int = 0
+        self.smoothed_confusion: float = 0.0
+        self.confusion_confidence: float = 0.0
 
     def reset(self):
         self.confused_elapsed = 0.0
@@ -60,7 +66,8 @@ class ConfusionState:
         self.is_confused = False
         self.face_cache = None
         self.frame_count = 0
-
+        self.smoothed_confusion = 0.0
+        self.confusion_confidence = 0.0
 
 class ConfuseDetector:
     def __init__(
@@ -99,6 +106,8 @@ class ConfuseDetector:
         self._frame_count = 0
         self.DETECT_EVERY_N = 3
         self.is_confused = False
+        self.smoothed_confusion = 0.0
+        self.calibrator = ConfusionCalibrator(sensitivity="medium")
 
     def detect_face(self, frame):
         h, w = frame.shape[:2]
@@ -121,63 +130,51 @@ class ConfuseDetector:
 
         return best_box  # (x1, y1, x2, y2) or None
 
-    def predict(self, face, frame_rgb):
+    def predict(self, face, frame_rgb, return_scores: bool = False):
         if face is None:
-            return None
+            return (None, {}) if return_scores else None
         x1, y1, x2, y2 = [int(v) for v in face]
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(frame_rgb.shape[1], x2), min(frame_rgb.shape[0], y2)
         face_rgb = frame_rgb[y1:y2, x1:x2]
-        if face_rgb.size == 0:
-            return None
-        emotion, _ = self.model.predict_emotions(face_rgb, logits=True)
-        return emotion.lower()
+        if face_rgb.size == 0 or self.model is None:
+            return (None, {}) if return_scores else None
+        try:
+            emotion, raw_scores = self.model.predict_emotions(face_rgb, logits=False)
+            top_em = emotion.lower() if emotion else None
+            scores_dict = {}
+            if hasattr(self.model, "idx_to_class") and raw_scores is not None:
+                for idx, sc in enumerate(raw_scores):
+                    cname = self.model.idx_to_class.get(idx, str(idx)).lower()
+                    scores_dict[cname] = float(sc)
+            if return_scores:
+                return top_em, scores_dict
+            return top_em
+        except Exception as e:
+            logger.warning(f"Error predicting emotions: {e}")
+            return (None, {}) if return_scores else None
 
     def create_state(self) -> ConfusionState:
         return ConfusionState()
 
-    def check_focus(self, emotion, state: ConfusionState = None):
+    def check_focus(self, emotion, state: ConfusionState = None, emotion_scores: Optional[dict] = None):
         target = state if state is not None else self
         now = time.time()
 
-        if emotion in CONFUSED_EMOTIONS:
-            target.recover_start_time = None
-            target.clear_start_time = None  # interrupt clearing
-            if target.confused_since is None:
-                target.confused_since = now
-            total = target.confused_elapsed + (now - target.confused_since)
-            if total >= self.CONFUSED_THRESHOLD_SECONDS:
-                target.is_confused = True
+        current_smoothed = getattr(target, "smoothed_confusion", 0.0)
+        is_confused, new_smoothed, new_confused_since, details = self.calibrator.update(
+            current_smoothed=current_smoothed,
+            is_currently_confused=target.is_confused,
+            top_emotion=emotion,
+            emotion_scores=emotion_scores,
+            confused_since=target.confused_since,
+            now=now,
+        )
 
-        elif emotion in NORMAL_EMOTIONS:
-            # pause confused timer
-            if target.confused_since is not None:
-                target.confused_elapsed += now - target.confused_since
-                target.confused_since = None
-
-            if target.is_confused:
-                # start/continue clear grace period
-                if target.clear_start_time is None:
-                    target.clear_start_time = now
-                elif now - target.clear_start_time >= self.CLEAR_THRESHOLD_SECONDS:
-                    # sustained normal — clear CONFUSED label
-                    target.is_confused = False
-                    target.clear_start_time = None
-                    target.confused_elapsed = 0.0
-                    target.recover_start_time = None
-            else:
-                # not confused — handle thinking timer recovery
-                if target.recover_start_time is None:
-                    target.recover_start_time = now
-                elif now - target.recover_start_time >= self.RECOVER_GRACE_SECONDS:
-                    target.confused_elapsed = 0.0
-                    target.recover_start_time = None
-
-        else:  # no face
-            if target.confused_since is not None:
-                target.confused_elapsed += now - target.confused_since
-                target.confused_since = None
-            target.clear_start_time = None  # interrupt clearing
+        target.is_confused = is_confused
+        target.smoothed_confusion = new_smoothed
+        target.confused_since = new_confused_since
+        target.confusion_confidence = new_smoothed
 
         return target.is_confused
 
@@ -221,8 +218,9 @@ class ConfuseDetector:
             self._frame_count += 1
             face = self._face_cache
 
-        emotion = self.predict(face, frame_rgb)
-        confused = self.check_focus(emotion, state=state)
+        pred = self.predict(face, frame_rgb, return_scores=True)
+        emotion, scores = pred if isinstance(pred, tuple) else (pred, None)
+        confused = self.check_focus(emotion, state=state, emotion_scores=scores)
 
         if draw:
             status_text, status_color = self.get_hud(emotion, confused, state=state)

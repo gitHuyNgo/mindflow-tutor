@@ -34,6 +34,14 @@ class Orchestrator:
         Knowledge hierarchy: RAG > LLM > Web Search
         """
         try:
+            if not user_id or not str(user_id).strip():
+                raise ValueError("user_id is strictly required for process_confusion_trigger")
+
+            # Enforce session ownership verification before fetching context
+            has_access = await self.memory.check_session_access_async(session_id, user_id)
+            if not has_access:
+                raise PermissionError(f"Access denied: user {user_id} is not authorized for session {session_id}")
+
             # Step 1: Parallel execution of Vision analysis and Memory retrieval
             vision_task = asyncio.create_task(
                 self.vision.analyze_screen(screen_capture)
@@ -41,7 +49,6 @@ class Orchestrator:
             memory_task = asyncio.create_task(
                 self.memory.get_context_summary_async(session_id)
             )
-
             # Wait for parallel tasks
             screen_analysis, history_context = await asyncio.gather(vision_task, memory_task)
             
@@ -76,8 +83,7 @@ class Orchestrator:
             )
             
             # Get formatted history for OpenAI
-            formatted_history = self.memory.get_formatted_history(session_id)
-            
+            formatted_history = await self.memory.get_formatted_history_async(session_id)
             text_response = await self.openai.generate_response(
                 system_prompt=TUTOR_SYSTEM_PROMPT,
                 user_message=prompt_context,
@@ -125,12 +131,19 @@ class Orchestrator:
     ) -> dict:
         """Process a direct question from the user"""
         try:
+            if not user_id or not str(user_id).strip():
+                raise ValueError("user_id is strictly required for process_direct_question")
+
+            # Enforce session ownership verification before fetching history
+            has_access = await self.memory.check_session_access_async(session_id, user_id)
+            if not has_access:
+                raise PermissionError(f"Access denied: user {user_id} is not authorized for session {session_id}")
+
             # Get RAG context (filtered by user tenant)
             rag_context = self.rag.get_context(question, user_id=user_id)
             
             # Get formatted history
             formatted_history = await self.memory.get_formatted_history_async(session_id)
-            # Generate response
             text_response = await self.openai.generate_response(
                 system_prompt=TUTOR_SYSTEM_PROMPT,
                 user_message=question,

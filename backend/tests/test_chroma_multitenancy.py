@@ -74,3 +74,43 @@ def test_chroma_store_delete_by_source_scoped_to_user():
         include=["metadatas"],
     )
     mock_collection.delete.assert_called_once_with(ids=["chunk_1", "chunk_2"])
+
+def test_chroma_store_operations_reject_missing_user_id():
+    """Verify that omitting user_id raises ValueError across all ChromaStore operations."""
+    import pytest
+    store = ChromaStore.__new__(ChromaStore)
+    mock_collection = MagicMock()
+    store.collection = mock_collection
+
+    with pytest.raises(ValueError, match="Tenant user_id is required"):
+        store.query("hello", user_id=None)
+
+    with pytest.raises(ValueError, match="Tenant user_id is required"):
+        store.add_documents(["doc"], [{}], user_id=None)
+
+    with pytest.raises(ValueError, match="Tenant user_id is required"):
+        store.delete_by_source("source.pdf", user_id=None)
+
+    with pytest.raises(ValueError, match="Tenant user_id is required"):
+        store.list_sources(user_id=None)
+
+    with pytest.raises(ValueError, match="Tenant user_id is required"):
+        store.get_document_count(user_id=None)
+
+
+def test_rag_retriever_unscoped_calls_safe_fallback():
+    """Verify that RAGRetriever safely short-circuits without querying vector store if user_id is None."""
+    from engines.rag_retriever import RAGRetriever
+    retriever = RAGRetriever.__new__(RAGRetriever)
+    mock_chroma = MagicMock()
+    retriever.chroma = mock_chroma
+
+    # Unauthenticated retrieve should return empty result
+    res = retriever.retrieve("algebra", user_id=None)
+    assert res["results"] == []
+    assert res["total_found"] == 0
+    mock_chroma.query.assert_not_called()
+
+    # Unauthenticated get_context should return safe fallback string
+    ctx = retriever.get_context("algebra", user_id=None)
+    assert ctx == "No relevant materials found in uploaded documents."

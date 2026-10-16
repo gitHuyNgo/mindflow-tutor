@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from schemas.models import DocumentUploadResponse, DocumentInfo
 from engines.rag_retriever import get_rag_retriever
 from core.database import get_db
-from core.auth import get_optional_current_user
+from core.auth import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
 
@@ -28,7 +28,7 @@ MAX_PDF_BYTES = 50 * 1024 * 1024  # 50 MB
 @router.post("/v1/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    current_user: Optional[dict] = Depends(get_optional_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Upload and index a PDF document scoped to the authenticated user"""
     try:
@@ -51,7 +51,7 @@ async def upload_document(
                     raise HTTPException(status_code=413, detail="PDF exceeds 50 MB limit")
                 buf.write(chunk)
 
-        user_id = current_user["id"] if current_user else "default"
+        user_id = current_user["id"]
         rag = get_rag_retriever()
         result = await rag.index_document(str(file_path), file.filename, user_id=user_id)
         if not result["success"]:
@@ -86,11 +86,11 @@ async def upload_document(
 
 
 @router.get("/v1/documents", response_model=List[DocumentInfo])
-async def list_documents(current_user: Optional[dict] = Depends(get_optional_current_user)):
+async def list_documents(current_user: dict = Depends(get_current_user)):
     """List indexed documents for the current user"""
     try:
         db = get_db()
-        query = {"user_id": current_user["id"]} if current_user else {}
+        query = {"user_id": current_user["id"]}
         documents = await db.documents.find(query, {"_id": 0}).to_list(100)
         return [
             DocumentInfo(
@@ -110,17 +110,17 @@ async def list_documents(current_user: Optional[dict] = Depends(get_optional_cur
 @router.delete("/v1/documents/{document_id}")
 async def delete_document(
     document_id: str,
-    current_user: Optional[dict] = Depends(get_optional_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Delete a document owned by the current user"""
     try:
         db = get_db()
-        find_query = {"id": document_id}
-        if current_user:
-            find_query["user_id"] = current_user["id"]
-        doc = await db.documents.find_one(find_query)
+        user_id = current_user["id"]
+        doc = await db.documents.find_one({"id": document_id})
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
+        if doc.get("user_id") and doc["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this document")
 
         rag = get_rag_retriever()
         rag.delete_document(doc["filename"], user_id=doc.get("user_id"))
